@@ -22,18 +22,20 @@ import fundamentals
 import sources
 import stocks
 import stock_fundamentals
+from paper_service import PaperDesk
 from watchlist import Watchlist
 
 
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 
 class Harness:
     def __init__(self):
         self.indices = {i["id"]: {**i, "kind": "index"} for i in sources.catalog()}
         self.watchlist = Watchlist(runtime_dir() / "watchlist.sqlite")
+        self.paper = PaperDesk(runtime_dir() / "paper.sqlite", self.watchlist)
         self.default = "sh000300" if "sh000300" in self.indices else next(iter(self.indices))
         self.forward = ForwardBook(runtime_dir() / "forward.sqlite")
         self.reviewer = Reviewer(on_ready=self.forward.record)
@@ -82,7 +84,7 @@ class Harness:
             market["meta"]["warnings"] = list(market["meta"].get("warnings") or []) + [missing]
         return market
 
-    def research(self, symbol, horizon):
+    def research_inputs(self, symbol, horizon):
         index = self.instrument(symbol)
         if not index:
             raise KeyError(symbol)
@@ -91,11 +93,21 @@ class Harness:
             if market is None or time.monotonic() - ts >= 15:
                 market = self._market(index)
                 self.snapshots[symbol] = (time.monotonic(), market)
-        analysis = analyze(market, horizon)
-        review = self.reviewer.submit(index, market, analysis)
+        return index, market, analyze(market, horizon)
+
+    def research(self, symbol, horizon, lang="zh"):
+        index, market, analysis = self.research_inputs(symbol, horizon)
+        review = self.reviewer.submit(index, market, analysis, lang=lang)
         track = self.forward.track(symbol, horizon, market["bars"], adjustment=market["meta"].get("adjustment"))
         return dict(index=index, market=market, analysis=analysis, review=review, astra=review, forward=track,
                     generated_at=datetime.now(TZ).isoformat(timespec="seconds"))
+
+    def paper_review(self, symbol, horizon, lang):
+        self.paper.stock(symbol)
+        index, market, analysis = self.research_inputs(symbol, horizon)
+        with self.paper.lock:
+            position = self.paper.position(symbol)
+            return self.reviewer.submit(index, market, analysis, position=position, lang=lang)
 
 
 class Endpoint(BaseHTTPRequestHandler):
@@ -151,7 +163,45 @@ class Endpoint(BaseHTTPRequestHandler):
             if not security or security["id"] != symbol or not security.get("listed", True) or symbol in app.indices:
                 return self.respond(400, {"error": "未在 A 股上市证券目录中找到该股票"})
             security = {**security, "kind": "stock", "listed": True}
-        return self.respond(200, {"stocks": app.watchlist.update(symbol, security)})
+        with app.paper.lock:
+            if action == "remove" and symbol in app.paper.book.symbols():
+                return self.respond(409, {"error": "该股票仍有模拟持仓，请平仓后再移出自选"})
+            updated = app.watchlist.update(symbol, security)
+        return self.respond(200, {"stocks": updated})
+
+    def paper_request(self, app, path):
+        params = parse_qs(path.query, keep_blank_values=True)
+        route = path.path
+        try:
+            if self.command == "POST" and route in ("/api/paper/preview", "/api/paper/orders"):
+                data = self.read_json(2048)
+                if route.endswith("/orders"):
+                    result = app.paper.order(data, confirm=True, on_fill=app.reviewer.invalidate_paper)
+                else:
+                    result = app.paper.order(data)
+            elif self.command == "GET" and route == "/api/paper":
+                result = app.paper.snapshot(params.get("symbol", [""])[0])
+            elif route == "/api/paper/review":
+                if self.command == "POST":
+                    query = self.read_json(2048)
+                    if not isinstance(query, dict):
+                        raise ValueError("无效的持仓复核参数")
+                else:
+                    query = {k: v[0] for k, v in params.items()}
+                symbol = query.get("symbol")
+                app.paper.stock(symbol)
+                horizon, lang = str(query.get("horizon", 5)), query.get("lang", "zh")
+                if horizon not in ("1", "5", "20") or lang not in ("zh", "en"):
+                    raise ValueError("无效的持仓复核参数")
+                slot = (symbol, int(horizon), "paper") + (("en",) if lang == "en" else ())
+                review = (app.paper_review(symbol, int(horizon), lang) if self.command == "POST"
+                          else app.reviewer.get(slot))
+                result = {"review": review}
+            else:
+                return self.respond(404, {"error": "资源不存在"})
+        except ValueError as error:
+            return self.respond(400, {"error": str(error)})
+        return self.respond(200, result)
 
     def dispatch(self):
         path = urlsplit(self.path)
@@ -172,7 +222,11 @@ class Endpoint(BaseHTTPRequestHandler):
                 return self.respond(200, settings)
             if path.path == "/api/watchlist":
                 return self.update_watchlist(app)
+            if path.path.startswith("/api/paper/"):
+                return self.paper_request(app, path)
             return self.respond(404, {"error": "资源不存在"})
+        if path.path == "/api/paper" or path.path.startswith("/api/paper/"):
+            return self.paper_request(app, path)
         if path.path == "/api/settings":
             return self.respond(200, app.reviewer.settings.public())
         if path.path == "/api/search":
@@ -193,13 +247,14 @@ class Endpoint(BaseHTTPRequestHandler):
             params = parse_qs(path.query, keep_blank_values=True)
             index = params.get("index", [app.default])[0]
             horizon = params.get("horizon", ["5"])[0]
-            if not app.instrument(index) or horizon not in ("1", "5", "20"):
+            lang = params.get("lang", ["zh"])[0]
+            if not app.instrument(index) or horizon not in ("1", "5", "20") or lang not in ("en", "zh"):
                 return self.respond(400, {"error": "请选择有效指数或先将股票加入自选，周期可选 1、5、20 日"})
             if path.path in ("/api/review", "/api/astra"):
-                review = app.reviewer.get((index, int(horizon)))
+                review = app.reviewer.get((index, int(horizon)) + (("en",) if lang == "en" else ()))
                 return self.respond(200, {"review": review, "astra": review})
             try:
-                result = app.research(index, int(horizon))
+                result = app.research(index, int(horizon), lang)
             except KeyError:
                 if not app.instrument(index):
                     return self.respond(404, {"error": "该股票已移出自选"})

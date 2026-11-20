@@ -5,6 +5,8 @@ from datetime import date, datetime, time, timedelta, timezone
 from math import expm1, isfinite, log, sqrt, tanh
 from statistics import fmean, pstdev
 
+from trading_costs import stock_scenarios
+
 
 SHANGHAI = timezone(timedelta(hours=8))
 HORIZONS = (1, 5, 20)
@@ -347,14 +349,19 @@ def analyze(market, horizon):
     confirm = round(max(b[2] for b in bars[-min(horizon+2, 10):]), 2)
     validated = (validation["n"] >= 24 and validation["mae"] < validation["baseline_mae"]
                  and validation["hit_rate"] > validation["baseline_hit_rate"])
+    trade_costs = stock_scenarios(market.get("id") or "", close, interval["base"], stop) if is_stock and close >= .01 else None
     if stale:
         action, position, trigger = "历史复盘", "等待新日线后再评估", f"数据截止 {day}，历史情景不可直接作为当前入场依据"
     elif untested:
         action, position, trigger = "等待样本积累", "暂缓新增个股敞口", f"{horizon} 日周期尚无成熟的样本外验证窗口，待更多交易日收盘后复核"
     elif direction == "偏弱":
         action, position, trigger = "防守观察", "暂停新增多头敞口", f"收盘跌破 {stop:,.2f} {unit}时，复核已有多头敞口并降低风险"
+    elif direction == "偏强" and validated and trade_costs and trade_costs["base_net_pnl"] <= 0:
+        action, position, trigger = "等待覆盖成本", "暂缓新增多头敞口", "参考股数下中枢情景的净收益未转正，等待成本后空间改善"
     elif direction == "偏强" and validated:
         action, position, trigger = "等待突破确认", "收盘确认后分批建立研究仓位", f"收盘突破近 {min(horizon+2, 10)} 日高点 {confirm:,.2f} {unit}后，再按可承受损失确定份额"
+        if is_stock:
+            trigger += "。用届时股价及实际股数重算，预期空间需覆盖买卖滑点和税费"
     elif direction == "偏强":
         action, position, trigger = "观察偏强信号", "保持观察仓位，暂缓加仓", "方向与误差检验尚未同时超过基准，等待下一收盘复核"
     else:
@@ -365,6 +372,8 @@ def analyze(market, horizon):
                 "stop": stop, "stop_note": f"现有多头按参考收盘价下方 {close-stop:,.2f} {unit}设置复核线，"
                       "以同一价格口径下入场时确定的保护线为下限，收盘触及后按可成交价格减仓。" + execution,
                 "review": f"每次收盘复核，最迟在第 {horizon} 个交易日收盘重新评估"}
+    if trade_costs:
+        strategy["trade_costs"] = trade_costs
     notes = [f"预测从 {day} 收盘 {close:,.2f} {unit}起算，区间为第 {horizon} 个交易日的收盘情景。",
              f"情报截止 {cutoff:%Y-%m-%d %H:%M}（上海），共 {len(evidence)} 个方向性类别参与。"
              if evidence else "未取得时点、范围及方向均可用的外部证据，本次采用价格模型。"]

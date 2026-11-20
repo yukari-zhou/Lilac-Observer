@@ -7,7 +7,10 @@
     <title>Lilac-Observer · A 股研究台</title>
     <link rel="icon" type="image/svg+xml" href="/mark.svg">
     <link rel="stylesheet" href="/style.css" />
+    <script src="/i18n.js" defer></script>
+    <script src="/research-en.js" defer></script>
     <script src="/chart.js" defer></script>
+    <script src="/paper.js" defer></script>
     <script src="/app.js" defer></script>
     <script src="/settings.js" defer></script>
   </head>
@@ -29,6 +32,7 @@
             <span data-icon="clock"></span><time id="clock">--:--:--</time
             ><small>UTC+8</small>
           </div>
+          <button class="settings-trigger" id="lang-switch" type="button" lang="en" aria-label="Switch to English">English</button>
           <button class="settings-trigger" id="model-settings" type="button" aria-haspopup="dialog" aria-controls="settings-dialog">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 8h7m4 0h7M3 16h11m4 0h3"/><circle cx="12" cy="8" r="2.3"/><circle cx="16" cy="16" r="2.3"/></svg>模型设置
           </button></div>
@@ -71,6 +75,7 @@
           <p id="watch-message" class="watch-message" role="status" aria-live="polite"></p>
         </div>
         <div id="status" role="status" aria-live="polite"></div>
+        <section id="paper-workspace" aria-labelledby="paper-title" hidden></section>
         <section id="workspace" aria-label="当前研究">
           <div class="initial">
             <span class="loader"></span><span>正在读取行情…</span>
@@ -78,7 +83,7 @@
         </section>
         <footer>
           <span><span lang="en">Lilac-Observer</span> <span class="footer-sep">/</span> A 股研究台</span>
-          <span>行情与预测仅供研究 · 所有时间均为北京时间</span>
+          <span>所有时间均为北京时间</span>
         </footer>
       </main>
     </div>

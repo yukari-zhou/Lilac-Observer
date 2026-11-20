@@ -22,8 +22,14 @@
   let requestController, quoteRequest;
   let searchTimer, searchRequest, savingWatchlist = false;
   const isStock = () => state.group === "stock";
+  function syncPaper() {
+    const stock = isStock() && state.view === "overview"
+      ? state.stocks.find((row) => row.id === state.index) : null;
+    window.LilacPaper?.select(stock, state.horizon);
+  }
   const unit = () => isStock() ? "元" : "点";
   const instruments = () => isStock() ? state.stocks : state.indices;
+  const displayName = (stock) => window.LilacI18n.lang === "en" && stock.english ? stock.english : stock.name;
   const esc = (value) =>
     String(value ?? "").replace(
       /[&<>"']/g,
@@ -144,7 +150,7 @@
             : null);
         const market = idx.id?.slice(0, 2).toUpperCase();
         const card = `<button class="index-tab" data-index="${esc(idx.id)}" aria-pressed="${state.index === idx.id}" ${quote ? `title="${esc(statusLabels[quote.status] || "报价")} · ${esc(time(quote.asof))}"` : ""}>
-        <span class="index-name">${esc(idx.name)}${state.index === idx.id ? '<i class="index-select"></i>' : ""}</span>
+        <span class="index-name">${esc(displayName(idx))}${state.index === idx.id ? '<i class="index-select"></i>' : ""}</span>
         <span class="index-code">${esc(market)} · ${esc(idx.code)}${quote && ["cached", "snapshot", "delayed"].includes(quote.status) ? ` <span class="quote-lag">${esc(statusLabels[quote.status])}</span>` : ""}</span>
         ${finite(quote?.price) ? `<span class="index-tape"><span>${number(quote.price)}</span><small class="${color(quote.change_pct)}">${finite(quote.change_pct) ? `${signed(quote.change_pct)}%` : "—"}</small></span>` : ""}
       </button>`;
@@ -157,6 +163,7 @@
     state.group = group;
     state.index = id || null;
     if (id) state.previous[group] = id;
+    syncPaper();
     if (state.range === "intraday" && group === "index") state.range = 60;
     const url = new URL(location.href);
     if (id) url.searchParams.set("symbol", id);
@@ -193,7 +200,7 @@
       if (s.listed === false || !s.id) {
         return `<div class="stock-match"><div><strong>${esc(s.name)}</strong><small>${esc(s.status_text || "暂无 A 股上市行情")}</small></div>${s.url ? sourceLink(s.url, "查看来源") : ""}</div>`;
       }
-      return `<button type="button" class="stock-match" data-add="${esc(s.id)}" ${savingWatchlist ? "disabled" : ""}><span><strong>${esc(s.name)}</strong><small>${esc(s.exchange || s.id.slice(0, 2).toUpperCase())} · ${esc(s.code)}</small></span><span class="match-action">${saved ? "查看走势" : "＋ 加入自选"}</span></button>`;
+      return `<button type="button" class="stock-match" data-add="${esc(s.id)}" ${savingWatchlist ? "disabled" : ""}><span><strong>${esc(displayName(s))}</strong><small>${esc(s.exchange || s.id.slice(0, 2).toUpperCase())} · ${esc(s.code)}</small></span><span class="match-action">${saved ? "查看走势" : "＋ 加入自选"}</span></button>`;
     }).join("");
   }
   async function findStocks() {
@@ -284,7 +291,7 @@
     const ranges = [[20, "1月"], [60, "3月"], [120, "6月"], [250, "1年"], [100000, "全部"]];
     if (isStock()) ranges.unshift(["intraday", "分时"]);
     return `<section class="panel chart-panel" aria-label="${isStock() ? "股票" : "指数"}行情与走势">
-      <div class="quote-head"><div><div class="instrument"><h2>${esc(idx.name)}</h2><span class="ticker">${esc(idx.code)}</span></div>
+      <div class="quote-head"><div><div class="instrument"><h2>${esc(displayName(idx))}</h2><span class="ticker">${esc(idx.code)}</span></div>
         <div class="quote-line"><strong class="quote-price">${number(price)}<small class="price-unit">${unit()}</small></strong>
         ${!fallback && finite(q.change) ? `<span class="delta ${color(q.change)}">${signed(q.change)}${finite(q.change_pct) ? ` (${signed(q.change_pct)}%)` : ""}</span>` : ""}</div>
         <p class="asof">${fallback ? "收盘日期" : "行情时间"} ${esc(time(fallback?.date || q.asof))}${q.source && !fallback ? ` · ${esc(q.source)}` : ""}</p></div>
@@ -361,7 +368,7 @@
     const row = (label, v, cls = "") =>
       `<div class="strategy-line"><dt>${label}</dt><dd class="${cls}">${esc(v || "—")}</dd></div>`;
     return `<section class="panel panel-pad"><div class="panel-top">${heading("risk", "策略与风控")}</div><dl class="strategy-lines">
-      ${row("风险阈值", finite(s.stop) ? `${number(s.stop)} ${unit()}` : "—", "stop")}${row("止损条件", s.stop_note)}${row("触发条件", s.trigger)}${row("仓位参考", s.position)}${row("复核", s.review)}</dl></section>`;
+      ${row("风险阈值", finite(s.stop) ? `${number(s.stop)} ${unit()}` : "—", "stop")}${row("止损条件", s.stop_note)}${row("触发条件", s.trigger)}${row("仓位参考", s.position)}${row("复核", s.review)}</dl>${window.LilacPaper?.costExample(s.trade_costs) || ""}</section>`;
   }
   function reviewStatus(agent) {
     if (agent.provider === "off" || agent.status === "disabled") return "仅量化";
@@ -459,7 +466,7 @@
       }</section>`;
   }
   function context(idx) {
-    return `<div class="panel panel-pad context"><strong>${esc(idx.name)}</strong><span class="ticker">${esc(idx.code)}</span><span>预测交易日</span>${horizons()}</div>`;
+    return `<div class="panel panel-pad context"><strong>${esc(displayName(idx))}</strong><span class="ticker">${esc(idx.code)}</span><span>预测交易日</span>${horizons()}</div>`;
   }
   function render() {
     const view = state.view;
@@ -572,7 +579,7 @@
       if (!document.hidden) {
         try {
           const data = await json(
-            `/api/review?${new URLSearchParams({ index: state.index, horizon: state.horizon })}`,
+            `/api/review?${new URLSearchParams({ index: state.index, horizon: state.horizon, lang: window.LilacI18n.lang })}`,
             { signal: AbortSignal.timeout(15000) },
           );
           if (seq !== state.seq || !state.current) return;
@@ -597,6 +604,7 @@
   }
   async function research(changed = false) {
     if (!state.index) return;
+    syncPaper();
     const seq = ++state.seq;
     requestController?.abort();
     requestController = new AbortController();
@@ -611,7 +619,7 @@
     if (changed || !state.current) pending();
     try {
       const data = await json(
-        `/api/research?${new URLSearchParams({ index: state.index, horizon: state.horizon })}`,
+        `/api/research?${new URLSearchParams({ index: state.index, horizon: state.horizon, lang: window.LilacI18n.lang })}`,
         { signal: requestController.signal },
       );
       if (seq !== state.seq) return;
@@ -655,6 +663,7 @@
       { factors: "factors", validation: "validation" }[
         location.hash.slice(1)
       ] || "overview";
+    syncPaper();
     render();
   }
   async function init() {
@@ -783,7 +792,7 @@
     second: "2-digit",
     hourCycle: "h23",
   });
-  const editionFormat = new Intl.DateTimeFormat("zh-CN", {
+  const editionFormat = new Intl.DateTimeFormat(window.LilacI18n.lang === "en" ? "en-GB" : "zh-CN", {
     timeZone: "Asia/Shanghai", year: "numeric", month: "long", day: "numeric", weekday: "long",
   });
   const clockTick = () => {

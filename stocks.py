@@ -240,10 +240,18 @@ def _tencent_quotes(ids):
                 continue
             suspended = (not volume and not op and not hi and not lo and
                          (stamp.hour, stamp.minute) >= (9, 30))
+            def book_price(i):
+                try:
+                    level = sources._num(f[i])
+                    return level if level > 0 else None
+                except (IndexError, ValueError):
+                    return None
             found[symbol] = dict(id=symbol, name=f[1], code=f[2], price=price, prev_close=previous,
                                  change=sources._num(f[31]), change_pct=sources._num(f[32]), open=op or None,
                                  high=hi or None, low=lo or None, volume=volume, amount=sources._num(f[37])*10000,
                                  asof=stamp.isoformat(), suspended=suspended, source="腾讯财经",
+                                 bid=book_price(9), ask=book_price(19),
+                                 limit_up=book_price(47), limit_down=book_price(48),
                                  url=f"https://gu.qq.com/{symbol}")
         except _FAILURES:
             continue
