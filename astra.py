@@ -93,6 +93,7 @@ def _ask_codex(packet, config):
         raise RuntimeError("未检测到 Codex CLI。安装后运行 codex login。")
     env = os.environ.copy()
     env.pop("HENGJIAN_API_KEY", None)
+    env.pop("LILAC_OBSERVER_API_KEY", None)
     # The Windows desktop can route through its system proxy while the CLI reads
     # proxy variables. Preserve explicit per-process overrides.
     for scheme, value in getproxies().items():

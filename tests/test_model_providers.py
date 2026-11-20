@@ -60,7 +60,7 @@ class Models(unittest.TestCase):
         temp = TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.path = Path(temp.name) / "model-settings.json"
-        affected = ("HENGJIAN_", "ASTRA_", "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY")
+        affected = ("LILAC_OBSERVER_", "HENGJIAN_", "ASTRA_", "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY")
         env = {k: v for k, v in os.environ.items() if not k.startswith(affected)}
         env["NO_PROXY"] = "127.0.0.1,localhost"
         patcher = patch.dict(os.environ, env, clear=True)
@@ -86,6 +86,20 @@ class Models(unittest.TestCase):
         self.assertFalse(reloaded.public()["has_api_key"])
         reloaded.update({"provider": "api", "base_url": base, "clear_api_key": True})
         self.assertFalse(reloaded.public()["has_api_key"])
+
+    def test_new_prefix_overrides_without_forwarding_legacy_key(self):
+        os.environ.update(HENGJIAN_PROVIDER="off", HENGJIAN_API_MODEL="old",
+                          HENGJIAN_API_BASE_URL="https://old.example/v1", HENGJIAN_API_KEY=secrets.token_hex(16),
+                          LILAC_OBSERVER_PROVIDER="api", LILAC_OBSERVER_API_MODEL="new",
+                          LILAC_OBSERVER_API_BASE_URL="https://new.example/v1",
+                          ASTRA_ENABLED="0", LILAC_OBSERVER_ENABLED="1", LILAC_OBSERVER_OFFLINE="0")
+        config = ModelSettings(self.path).snapshot()
+        self.assertEqual((config.provider, config.model, config.api_key, config.disabled), ("api", "new", "", False))
+        os.environ["LILAC_OBSERVER_API_KEY"] = secrets.token_hex(16)
+        settings = ModelSettings(self.path)
+        self.assertEqual(settings.snapshot().api_key, os.environ["LILAC_OBSERVER_API_KEY"])
+        settings.update({"provider": "api", "base_url": os.environ["HENGJIAN_API_BASE_URL"]})
+        self.assertFalse(settings.public()["has_api_key"])
 
     def test_invalid_inputs_preserve_file(self):
         settings = ModelSettings(self.path)

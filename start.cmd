@@ -1,9 +1,9 @@
 @echo off
 setlocal
-title Hengjian - A-share research
+title Lilac-Observer - A-share research
 cd /d "%~dp0"
 if errorlevel 1 goto fail
-echo Starting Hengjian...
+echo Starting Lilac-Observer...
 where.exe codex >nul 2>&1
 if errorlevel 1 (
     for /f "usebackq delims=" %%D in (`powershell.exe -NoProfile -NonInteractive -Command "(Get-AppxPackage -Name OpenAI.Codex).InstallLocation"`) do (
@@ -24,6 +24,6 @@ if errorlevel 1 goto fail
 pause
 exit /b 0
 :fail
-echo Could not start Hengjian. Check the error above.
+echo Could not start Lilac-Observer. Check the error above.
 pause
 exit /b 1

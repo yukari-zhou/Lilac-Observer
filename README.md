@@ -1,12 +1,14 @@
-# 衡见 Hengjian｜A 股行情、财报与 AI 策略复核
+# Lilac-Observer
 
-衡见是在本机运行的 A 股研究台。选择一个指数或上市公司，可以把报价与收盘走势、公司财报与公告、未来 1／5／20 个交易日的情景区间放在一起看。每条策略给出触发条件、风险复核线和依据。量化计算由 Python 完成，证据复核可选用 Codex、兼容 API 或本机模型。
+**A 股指数与个股研究台 · 行情、财报与 AI 策略复核**
 
-**衡见**取“权衡证据，形成判断”之意。A local-first research terminal for China's A-share market, with financial filings, walk-forward evaluation and optional model review.
+选择一个指数或上市公司，在本机查看价格走势、财报和公告，比较未来 1、5 或 20 个交易日的情景区间。每条策略给出触发条件、风险复核线和依据。Python 负责量化计算，证据复核可选 Codex CLI、兼容 API 或本机模型。
 
-[下载 v0.1.0](https://github.com/yukari-zhou/hengjian/releases/tag/v0.1.0) · [更新记录](CHANGELOG.md) · [研究方法](docs/research.md)
+A local-first research terminal for China’s A-share indices and stocks, with financial filings, walk-forward evaluation and optional AI review.
 
-![衡见研究台展示合成走势、情景区间和风险复核线](docs/terminal-preview.png)
+[下载 v0.2.0](https://github.com/yukari-zhou/Lilac-Observer/releases/tag/v0.2.0) · [更新记录](CHANGELOG.md) · [研究方法](docs/research.md)
+
+![Lilac-Observer 淡紫色研究台，展示合成行情、情景区间和风险复核线](docs/terminal-preview.png)
 
 *界面示例，使用合成行情。*
 
@@ -41,15 +43,18 @@
 
 | 环境变量 | 含义 |
 | --- | --- |
-| `HENGJIAN_PROVIDER` | `off`、`codex` 或 `api`；首次无显式配置时，有可用 Codex 命令则选 Codex，其余选仅量化 |
-| `HENGJIAN_CODEX_MODEL` | 可选的 Codex 模型 ID；兼容旧版 `ASTRA_MODEL` |
-| `HENGJIAN_API_BASE_URL`、`HENGJIAN_API_MODEL` | 兼容服务的基址和模型 ID |
-| `HENGJIAN_API_KEY` | 启动进程使用的密钥，仅用于与环境配置匹配的 API 基址 |
-| `HENGJIAN_RUNTIME_DIR` | 自选股、模型设置及研究留档的存储目录，默认 `.runtime/` |
-| `HENGJIAN_CACHE_DIR` | 行情与证券目录缓存根目录，兼容旧版 `ASTRA_CACHE_DIR` |
-| `HENGJIAN_OFFLINE=1` | 关闭网络数据采集和 AI 复核，查阅已有缓存，兼容旧版 `ASTRA_OFFLINE=1` |
+| `LILAC_OBSERVER_PROVIDER` | `off`、`codex` 或 `api`。首次启动且未指定时，有可用 Codex 命令则选 Codex，其余选仅量化 |
+| `LILAC_OBSERVER_CODEX_MODEL` | 可选的 Codex 模型 ID |
+| `LILAC_OBSERVER_API_BASE_URL`、`LILAC_OBSERVER_API_MODEL` | 兼容服务的基址和模型 ID |
+| `LILAC_OBSERVER_API_KEY` | 启动进程使用的密钥，仅用于与环境配置匹配的 API 基址 |
+| `LILAC_OBSERVER_RUNTIME_DIR` | 自选股、模型设置及研究留档的存储目录，默认 `.runtime/` |
+| `LILAC_OBSERVER_CACHE_DIR` | 行情与证券目录缓存根目录 |
+| `LILAC_OBSERVER_OFFLINE=1` | 关闭网络数据采集和 AI 复核，查阅已有缓存 |
+| `LILAC_OBSERVER_ENABLED=0` | 关闭 AI 复核，保留在线行情与量化计算 |
 
-旧版变量 `ASTRA_ENABLED=0` 仍可强制关闭 AI 复核。页面保存的字段优先于环境初值。相同端点的密钥栏留空可沿用原密钥；更换端点后请为新端点填写其专用密钥。可用「清除已保存密钥」取消密钥。备份、上传或提交文件前，请单独处理运行目录中的模型设置、自选列表与研究记录。
+从 v0.1.0 升级时，在原项目目录启动即可沿用自选股与模型设置。原有的 `HENGJIAN_*` 变量和 `ASTRA_MODEL`、`ASTRA_CACHE_DIR`、`ASTRA_OFFLINE`、`ASTRA_ENABLED` 仍可使用。同一项同时设置新旧变量时，优先读取 `LILAC_OBSERVER_*`。页面已保存的模型设置优先于相应环境初值。
+
+同一端点的密钥栏留空可沿用原密钥。更换端点后，请填写该端点的专用密钥。可用「清除已保存密钥」取消密钥。备份、上传或提交文件前，请单独处理运行目录中的模型设置、自选列表与研究记录。
 
 ## 从行情读到策略
 

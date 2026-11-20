@@ -14,12 +14,20 @@ from urllib.parse import urlsplit
 DEFAULT_BASE = "https://api.openai.com/v1"
 
 
+def env_setting(name, default=None):
+    return os.getenv(f"LILAC_OBSERVER_{name}", os.getenv(f"HENGJIAN_{name}", default))
+
+
 def offline():
-    return os.getenv("HENGJIAN_OFFLINE", os.getenv("ASTRA_OFFLINE", "")).lower() in ("1", "true", "yes")
+    return env_setting("OFFLINE", os.getenv("ASTRA_OFFLINE", "")).lower() in ("1", "true", "yes")
+
+
+def review_disabled_by_env():
+    return env_setting("ENABLED", os.getenv("ASTRA_ENABLED")) == "0"
 
 
 def runtime_dir():
-    configured = os.environ.get("HENGJIAN_RUNTIME_DIR")
+    configured = env_setting("RUNTIME_DIR")
     return Path(configured).expanduser() if configured else Path(__file__).resolve().parent / ".runtime"
 
 
@@ -78,7 +86,7 @@ class ModelConfig:
 
     @property
     def disabled(self):
-        return self.provider == "off" or os.environ.get("ASTRA_ENABLED") == "0" or offline()
+        return self.provider == "off" or review_disabled_by_env() or offline()
 
 
 class ModelSettings:
@@ -106,25 +114,26 @@ class ModelSettings:
         if not isinstance(saved, dict):
             raise ValueError("模型配置格式无效")
         default = "codex" if shutil.which("codex") else "off"
-        provider = saved.get("provider", os.getenv("HENGJIAN_PROVIDER", default))
+        provider = saved.get("provider", env_setting("PROVIDER", default))
         if provider not in ("codex", "api", "off"):
             raise ValueError("请选择 Codex、兼容 API 或关闭复核")
-        codex = _text(saved.get("codex_model", os.getenv("HENGJIAN_CODEX_MODEL", os.getenv("ASTRA_MODEL", ""))), 256, "Codex 模型名")
+        codex = _text(saved.get("codex_model", env_setting("CODEX_MODEL", os.getenv("ASTRA_MODEL", ""))), 256, "Codex 模型名")
         if codex and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/:@+-]*", codex):
             raise ValueError("请输入有效的 Codex 模型 ID，或留空使用 CLI 默认模型")
-        model = _text(saved.get("api_model", os.getenv("HENGJIAN_API_MODEL", "")), 256, "API 模型名")
-        env_url = os.getenv("HENGJIAN_API_BASE_URL", DEFAULT_BASE)
+        model = _text(saved.get("api_model", env_setting("API_MODEL", "")), 256, "API 模型名")
+        env_url = env_setting("API_BASE_URL", DEFAULT_BASE)
         base = _base_url(saved.get("base_url", env_url))
         if provider == "api" and not model:
             raise ValueError("请输入服务商提供的模型 ID")
         if "api_key" in saved:
             key = _key(saved["api_key"])
             origin = "local"
-        elif os.getenv("HENGJIAN_API_KEY") and base == _base_url(env_url):
-            key = _key(os.environ["HENGJIAN_API_KEY"])
-            origin = "environment"
         else:
-            key, origin = "", "none"
+            # A legacy token belongs only to the endpoint it was configured for.
+            key_url = env_url if "LILAC_OBSERVER_API_KEY" in os.environ else os.getenv("HENGJIAN_API_BASE_URL", DEFAULT_BASE)
+            env_key = env_setting("API_KEY", "")
+            key = _key(env_key) if env_key and base == _base_url(key_url) else ""
+            origin = "environment"
         return ModelConfig(provider, codex, model, base, key, origin if key else "none")
 
     def snapshot(self):
@@ -137,7 +146,7 @@ class ModelSettings:
             return dict(provider=cfg.provider, codex_model=cfg.codex_model, api_model=cfg.api_model,
                         base_url=cfg.base_url, has_api_key=bool(cfg.api_key), key_source=cfg.key_source,
                         codex_available=bool(shutil.which("codex")), offline=offline(),
-                        disabled_by_env=os.environ.get("ASTRA_ENABLED") == "0",
+                        disabled_by_env=review_disabled_by_env(),
                         warning=self.warning)
 
     def update(self, payload):

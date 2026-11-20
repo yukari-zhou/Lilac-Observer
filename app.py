@@ -27,7 +27,7 @@ from watchlist import Watchlist
 
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 
 class Harness:
@@ -99,7 +99,7 @@ class Harness:
 
 
 class Endpoint(BaseHTTPRequestHandler):
-    server_version = "Hengjian/1"
+    server_version = f"Lilac-Observer/{VERSION}"
 
     def send_bytes(self, status, body, mime):
         self.send_response(status)
@@ -184,7 +184,7 @@ class Endpoint(BaseHTTPRequestHandler):
                 return self.respond(503, {"error": "证券名录暂不可用。首次使用请联网，稍后重试。"})
             return self.respond(200, {"results": results})
         if path.path == "/api/health":
-            return self.respond(200, {"status": "ok", "service": "hengjian", "version": VERSION})
+            return self.respond(200, {"status": "ok", "service": "lilac-observer", "version": VERSION})
         if path.path == "/api/catalog":
             return self.respond(200, {"indices": list(app.indices.values()), "stocks": app.watchlist.all(), "default": app.default})
         if path.path == "/api/quotes":
@@ -224,8 +224,8 @@ class LocalServer(ThreadingHTTPServer):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="衡见 · A 股研究台")
-    parser.add_argument("--version", action="version", version=f"Hengjian {VERSION}")
+    parser = argparse.ArgumentParser(description="Lilac-Observer · A 股研究台")
+    parser.add_argument("--version", action="version", version=f"Lilac-Observer {VERSION}")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--open", action="store_true", help="在默认浏览器打开")
     args = parser.parse_args()
@@ -236,7 +236,7 @@ def main():
         from urllib.request import urlopen
         try:
             with urlopen(url + "api/health", timeout=2) as response:
-                existing = json.load(response).get("service") in ("hengjian", "astra-a-share")
+                existing = json.load(response).get("service") in ("lilac-observer", "hengjian", "astra-a-share")
         except Exception:
             existing = False
         if existing:

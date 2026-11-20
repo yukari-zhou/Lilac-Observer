@@ -15,13 +15,15 @@ from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 
+from llm_config import env_setting, offline
+
 CN = timezone(timedelta(hours=8))
 _SYMBOLS = {
     "sh000001": "上证指数", "sz399001": "深证成指", "sh000300": "沪深300",
     "sz399006": "创业板指", "sh000016": "上证50", "sh000905": "中证500",
 }
 SNAPSHOTS = Path(__file__).resolve().parent / "data" / "market"
-CACHE = Path(os.environ.get("HENGJIAN_CACHE_DIR") or os.environ.get("ASTRA_CACHE_DIR") or
+CACHE = Path(env_setting("CACHE_DIR") or os.environ.get("ASTRA_CACHE_DIR") or
              Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".cache") / "astra-index" / "market-v1")
 _LOCKS = {key: threading.Lock() for key in [*_SYMBOLS, "quotes", "news", "pmi"]}
 _MEM = {}
@@ -33,10 +35,6 @@ _FAILURES = (OSError, ValueError, KeyError, IndexError, TypeError, OverflowError
 
 def now():
     return datetime.now(CN)
-
-
-def offline():
-    return os.getenv("HENGJIAN_OFFLINE", os.getenv("ASTRA_OFFLINE", "")).lower() in ("1", "true", "yes")
 
 
 def catalog():

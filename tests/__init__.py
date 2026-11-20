@@ -1,1 +1,1 @@
-"""Hengjian regression tests."""
+"""Lilac-Observer regression tests."""

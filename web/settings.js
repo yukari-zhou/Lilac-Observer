@@ -45,7 +45,7 @@
     modeNote.hidden = !settings?.offline && !settings?.disabled_by_env;
     modeNote.textContent = settings?.offline
       ? "当前启用离线模式。恢复联网模式后，所选模型可参与复核。"
-      : "当前服务使用 ASTRA_ENABLED=0 启动，调整该环境变量并重启后可启用 AI 复核。";
+      : "当前服务通过环境变量关闭了 AI 复核。调整环境变量并重启服务后可启用复核。";
   }
   async function request(options = {}) {
     const response = await fetch("/api/settings", {

@@ -106,12 +106,12 @@
       gradient.append(
         element("stop", {
           offset: "0%",
-          "stop-color": "#477f66",
-          "stop-opacity": 0.27,
+          "stop-color": "var(--accent-line)",
+          "stop-opacity": 0.32,
         }),
         element("stop", {
           offset: "100%",
-          "stop-color": "#477f66",
+          "stop-color": "var(--accent-line)",
           "stop-opacity": 0.015,
         }),
       );
@@ -122,7 +122,7 @@
           x2: plotEnd,
           y1: y(tick),
           y2: y(tick),
-          stroke: "#b6c1b2",
+          stroke: "var(--border)",
           "stroke-dasharray": "3 5",
           "stroke-width": 0.8,
         });
@@ -162,7 +162,7 @@
       nodes("path", {
         d: line,
         fill: "none",
-        stroke: "#226649",
+        stroke: "var(--accent)",
         "stroke-width": 2.35,
         "stroke-linejoin": "round",
         "stroke-linecap": "round",
@@ -175,23 +175,23 @@
           y: top,
           width: plotEnd - boundary,
           height: bottom - top,
-          fill: "#a88749",
-          "fill-opacity": 0.032,
+          fill: "var(--projection-fill)",
+          "fill-opacity": 0.09,
         });
         nodes("line", {
           x1: boundary,
           x2: boundary,
           y1: top,
           y2: bottom,
-          stroke: "#95815f",
+          stroke: "var(--projection)",
           "stroke-dasharray": "3 5",
         });
         nodes("path", {
           d: `M${boundary} ${lastY} L${forecastX} ${y(high)} L${forecastX} ${y(low)} Z`,
-          fill: "#bd9757",
-          "fill-opacity": 0.17,
-          stroke: "#97743f",
-          "stroke-opacity": 0.46,
+          fill: "var(--projection-fill)",
+          "fill-opacity": 0.32,
+          stroke: "var(--projection)",
+          "stroke-opacity": 0.85,
           "stroke-width": 1,
         });
         nodes("line", {
@@ -199,11 +199,11 @@
           x2: forecastX,
           y1: lastY,
           y2: y(base),
-          stroke: "#856532",
+          stroke: "var(--projection)",
           "stroke-width": 1.6,
           "stroke-dasharray": "4 3",
         });
-        nodes("circle", { cx: forecastX, cy: y(base), r: 3, fill: "#997841" });
+        nodes("circle", { cx: forecastX, cy: y(base), r: 3, fill: "var(--projection)" });
         nodes(
           "text",
           { x: forecastX, y: height - 7, "text-anchor": "end" },
@@ -214,21 +214,21 @@
         cx: boundary,
         cy: lastY,
         r: 3.4,
-        fill: "#376b54",
-        stroke: "#fffef9",
+        fill: "var(--accent)",
+        stroke: "var(--panel)",
         "stroke-width": 1.5,
       });
       const hair = nodes("line", {
         y1: top,
         y2: bottom,
-        stroke: "#738575",
+        stroke: "var(--muted)",
         "stroke-dasharray": "3 3",
         visibility: "hidden",
       });
       const dot = nodes("circle", {
         r: 4,
-        fill: "#fffef9",
-        stroke: "#306047",
+        fill: "var(--panel)",
+        stroke: "var(--accent)",
         "stroke-width": 2,
         visibility: "hidden",
       });
