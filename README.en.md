@@ -27,7 +27,7 @@ Select English in the interface or use the English URL directly. Original compan
 
 ## Paper trading
 
-1. Select a stock from your watchlist and expand **Paper trading & positions**. All watchlist stocks share one local cash account, starting with **RMB 1,000,000**.
+1. Select a stock from your watchlist and expand **A-share paper trading & position review**. All watchlist stocks share one local cash account, starting with **RMB 1,000,000**.
 2. Choose Buy or Sell, enter the share quantity and select **Preview order**. Check the reference quote, simulated fill, slippage, itemized fees and cash change. Select **Confirm paper fill** to post it to your ledger. Purchases use available cash. Stock bought today becomes eligible for sale on the next trading day. Board-specific order sizes and sellable balances apply.
 3. Check the position’s cost, current value, unrealized P&L and estimated P&L after liquidation. Under the stock’s strategy and risk section, expand **Trading cost scenario** to compare break-even and net P&L at the base forecast and at the risk threshold for an illustrative order.
 4. To request a position review, select the review button for the current stock. The selected model receives the stock’s simulated position, sellable quantity, cost, weight, account cash and equity, together with the research packet. Ordinary market reviews use public market inputs. Position reviews run on explicit request, do not place orders and are kept separate from forecast validation.

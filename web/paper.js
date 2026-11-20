@@ -91,7 +91,7 @@
     const ctx = active = {stock, horizon, side:pending?.side || "buy", pending, book:null,
       review:null, reviewSeq:0, reviewBusy:false, reading:false, busy:false, stale:false, preview:null};
     host.innerHTML = `<details class="paper-shell panel" id="paper-shell">
-      <summary><span class="paper-heading"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="5" width="18" height="15" rx="2"/><path d="M3 10h18m-6 5h3"/></svg><strong id="paper-title">${say("模拟交易与持仓", "Paper trading & positions")}</strong></span>
+      <summary><span class="paper-heading"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="5" width="18" height="15" rx="2"/><path d="M3 10h18m-6 5h3"/></svg><strong id="paper-title">${say("A 股模拟交易与持仓复核", "A-share paper trading & position review")}</strong></span>
       <span class="paper-summary-name">${esc(language() === "en" ? stock.english || stock.code : stock.name)} <span aria-hidden="true">⌄</span></span></summary>
       <div class="paper-body"><div class="paper-subhead"><h3>${say("模拟账户", "Paper account")}</h3>
       <button class="paper-button" type="button" id="paper-refresh">${say("刷新账户", "Refresh account")}</button></div>
