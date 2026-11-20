@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#123f37" />
+    <title>衡见 · A 股研究台</title>
+    <link rel="icon" type="image/svg+xml" href="/mark.svg">
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/chart.js" defer></script>
+    <script src="/app.js" defer></script>
+    <script src="/settings.js" defer></script>
+  </head>
+  <body>
+    <a href="#content" class="skip">跳至研究内容</a>
+    <div class="app">
+      <header class="topbar">
+        <div class="topbar-in">
+          <a class="brand" href="#overview" aria-label="衡见研究台首页">
+            <img class="brand-mark" width="36" height="36" src="/mark.svg" alt="">
+            <span class="brand-text"><b>衡见</b><small>HENGJIAN</small></span>
+          </a>
+          <nav aria-label="主导航">
+            <a href="#overview" data-view="overview">研究终端</a>
+            <a href="#factors" data-view="factors">因子与情报</a>
+            <a href="#validation" data-view="validation">历史验证</a>
+          </nav>
+          <div class="mast-actions"><div class="clock" title="北京时间">
+            <span data-icon="clock"></span><time id="clock">--:--:--</time
+            ><small>UTC+8</small>
+          </div>
+          <button class="settings-trigger" id="model-settings" type="button" aria-haspopup="dialog" aria-controls="settings-dialog">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 8h7m4 0h7M3 16h11m4 0h3"/><circle cx="12" cy="8" r="2.3"/><circle cx="16" cy="16" r="2.3"/></svg>模型设置
+          </button></div>
+        </div>
+      </header>
+      <main id="content">
+        <section class="page-heading">
+          <div class="heading-main">
+            <time class="edition-date" id="today"></time>
+            <h1 id="page-title">A 股研究台</h1>
+          </div>
+          <div class="toolbar">
+            <label class="auto-control"
+              ><input type="checkbox" id="auto" checked /><span
+                class="switch"
+              ></span
+              >自动刷新</label
+            >
+            <button id="refresh" class="refresh">
+              <span data-icon="refresh"></span><span>刷新数据</span>
+            </button>
+          </div>
+        </section>
+        <div class="watchlist-wrap">
+          <div class="universe-bar">
+            <div class="universe-switch" role="group" aria-label="标的类型">
+              <button type="button" data-group="index" aria-pressed="true">市场指数</button>
+              <button type="button" data-group="stock" aria-pressed="false">自选股 <span id="stock-count">0</span></button>
+            </div>
+            <div id="stock-finder" class="stock-finder" role="search" aria-label="搜索上市公司">
+              <div class="finder-field">
+                <span data-icon="search"></span>
+                <input id="stock-query" type="search" autocomplete="off" maxlength="80" disabled
+                       placeholder="搜索股票名称或代码" aria-label="搜索股票名称或代码" aria-controls="search-results">
+              </div>
+              <div id="search-results" class="search-results" hidden></div>
+            </div>
+          </div>
+          <div id="indices" class="watchlist" role="group" aria-label="选择研究标的"></div>
+          <p id="watch-message" class="watch-message" role="status" aria-live="polite"></p>
+        </div>
+        <div id="status" role="status" aria-live="polite"></div>
+        <section id="workspace" aria-label="当前研究">
+          <div class="initial">
+            <span class="loader"></span><span>正在读取行情…</span>
+          </div>
+        </section>
+        <footer>
+          <span>衡见 HENGJIAN <span class="footer-sep">/</span> A 股研究台</span>
+          <span>行情与预测仅供研究 · 所有时间均为北京时间</span>
+        </footer>
+      </main>
+    </div>
+    <dialog id="settings-dialog" aria-labelledby="settings-title">
+      <form id="settings-form" autocomplete="off">
+        <div class="dialog-header">
+          <h2 id="settings-title">模型设置</h2>
+          <button type="button" class="dialog-close" id="settings-close" aria-label="关闭模型设置">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg>
+          </button>
+        </div>
+        <p class="settings-intro">选择用于复核量化结果、财报与市场情报的模型。</p>
+        <fieldset id="provider-fields">
+          <legend>接入方式</legend>
+          <div class="provider-picker">
+            <label><input type="radio" name="provider" value="codex">Codex CLI</label>
+            <label><input type="radio" name="provider" value="api">兼容 API</label>
+            <label><input type="radio" name="provider" value="off">仅量化</label>
+          </div>
+        </fieldset>
+        <div id="codex-fields" class="setting-fields" hidden>
+          <label for="codex-model">Codex 模型 <small>可选</small></label>
+          <input id="codex-model" type="text" spellcheck="false" placeholder="使用 Codex 默认模型">
+          <p class="field-note" id="codex-state"></p>
+        </div>
+        <div id="api-fields" class="setting-fields" hidden>
+          <label for="api-url">API 地址</label>
+          <input id="api-url" type="url" spellcheck="false" placeholder="https://api.openai.com/v1">
+          <p class="field-note">支持 Chat Completions 兼容服务和本机推理服务。</p>
+          <label for="api-model">模型 ID</label>
+          <input id="api-model" type="text" spellcheck="false" placeholder="填写服务端提供的模型名称">
+          <label for="api-key">API 密钥 <small>按服务要求填写</small></label>
+          <input id="api-key" type="password" autocomplete="new-password" spellcheck="false">
+          <div class="key-meta"><span class="field-note" id="key-state"></span><label class="clear-key" id="clear-key-label" hidden><input type="checkbox" id="clear-key">清除已保存密钥</label></div>
+          <p class="field-note">行情摘要与证据将发送至所填服务，设置保存在本机。</p>
+        </div>
+        <p id="off-explanation" class="mode-explanation" hidden>继续计算量化因子、走势区间和风险参考，暂停 AI 复核。</p>
+        <p id="offline-note" class="mode-explanation" hidden>当前启用离线模式。恢复联网模式后，所选模型可参与复核。</p>
+        <p id="settings-feedback" role="status" aria-live="polite"></p>
+        <div class="dialog-actions"><button type="button" id="settings-retry" hidden>重新读取</button><button type="button" id="settings-cancel">取消</button><button type="submit" id="settings-save">保存设置</button></div>
+      </form>
+    </dialog>
+  </body>
+</html>

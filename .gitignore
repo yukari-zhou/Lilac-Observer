@@ -1,0 +1,14 @@
+.venv/
+venv/
+__pycache__/
+.runtime/
+.cache/
+*.pyc
+data/
+.env
+.env.*
+*.sqlite*
+*.log
+model-settings.json
+.DS_Store
+.pytest_cache/

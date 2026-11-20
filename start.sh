@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")"
+
+if [ ! -x .venv/bin/python ]; then
+    python3 -m venv .venv
+fi
+if ! .venv/bin/python -c 'import xlrd' >/dev/null 2>&1; then
+    .venv/bin/python -m pip install -r requirements.txt || echo "CSI weight updates require xlrd. Other feeds can still be used." >&2
+fi
+exec .venv/bin/python app.py --open "$@"
