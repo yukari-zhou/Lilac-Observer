@@ -28,7 +28,7 @@ from watchlist import Watchlist
 
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 
 
 class Harness:

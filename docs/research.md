@@ -72,6 +72,12 @@
 
 返回值中，`analysis.interval.return_base`、`validation.mae` 等收益率字段以小数表示，0.01 即 1%。`market.quote.change_pct` 以及财报中的 `revenue_yoy`、`profit_yoy` 已乘 100，1.0 即 1%。`review` 是当前复核对象，在异步完成前请查看其 `status`。页面启用自动刷新且处于可见状态时，会轮询报价和研究结果。关闭页面会停止页面轮询。
 
+## 配置兼容
+
+程序仍读取 `HENGJIAN_*`、`ASTRA_MODEL`、`ASTRA_CACHE_DIR`、`ASTRA_OFFLINE` 和 `ASTRA_ENABLED`。同一项同时设置多个变量时，优先读取 `LILAC_OBSERVER_*`。API 密钥仅在对应的服务地址上使用。
+
+Existing installations can keep the environment variables listed above. When both forms are set, the corresponding `LILAC_OBSERVER_*` value takes precedence. API keys apply only to their configured endpoint.
+
 ## 开发与测试
 
 入口在 `app.py`，静态界面在 `web/`。行情采集在 `sources.py` 和 `stocks.py`，指数及公司财报在 `fundamentals.py` 和 `stock_fundamentals.py`，数值模型在 `engine.py`，配置和模型适配在 `llm_config.py`、`astra.py`，前向核验在 `forward.py`。这些位置便于替换采集器或单独比较某项策略。

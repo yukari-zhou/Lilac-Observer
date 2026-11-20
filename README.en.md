@@ -6,7 +6,7 @@
 
 Search for a listed company or select one of six market indices. Inspect the price history, financial filings and news behind each forecast, then compare scenarios over 1, 5 or 20 trading sessions. For individual stocks, you can open a simulated long position and ask the model how the evidence relates to its cost, weight and sellable balance.
 
-[Download v0.3.0](https://github.com/yukari-zhou/Lilac-Observer/releases/tag/v0.3.0) · [Changelog](CHANGELOG.md) · [Research methods and local API](docs/research.md)
+[Download v0.3.1](https://github.com/yukari-zhou/Lilac-Observer/releases/tag/v0.3.1) · [Changelog](CHANGELOG.md) · [Research methods and local API](docs/research.md)
 
 ![Lilac-Observer paper account showing a simulated position, its break-even price and an itemized order preview](docs/paper-preview-en.png)
 
@@ -67,7 +67,7 @@ Preferences saved through the UI take precedence over environment defaults. A ke
 | `LILAC_OBSERVER_OFFLINE=1` | Use available cached data and disable AI review |
 | `LILAC_OBSERVER_ENABLED=0` | Keep market data online and disable AI review |
 
-The older `HENGJIAN_*` variables and `ASTRA_MODEL`, `ASTRA_CACHE_DIR`, `ASTRA_OFFLINE` and `ASTRA_ENABLED` are supported. The `LILAC_OBSERVER_*` value takes precedence for the same setting. Keep runtime files and credentials private when sharing a copy of the project.
+Keep runtime files and credentials private when sharing a copy of the project. Existing installations can keep their environment settings. [Configuration compatibility](docs/research.md#配置兼容)
 
 ## Read a forecast
 

@@ -8,7 +8,7 @@
 
 A local-first research terminal for China’s A-share indices and stocks, with financial filings, walk-forward evaluation and optional AI review.
 
-[下载 v0.3.0](https://github.com/yukari-zhou/Lilac-Observer/releases/tag/v0.3.0) · [更新记录](CHANGELOG.md) · [研究方法](docs/research.md)
+[下载 v0.3.1](https://github.com/yukari-zhou/Lilac-Observer/releases/tag/v0.3.1) · [更新记录](CHANGELOG.md) · [研究方法](docs/research.md)
 
 ![Lilac-Observer 淡紫色研究台，展示合成行情、情景区间和风险复核线](docs/terminal-preview.png)
 
@@ -74,7 +74,7 @@ A local-first research terminal for China’s A-share indices and stocks, with f
 | `LILAC_OBSERVER_OFFLINE=1` | 关闭网络数据采集和 AI 复核，查阅已有缓存 |
 | `LILAC_OBSERVER_ENABLED=0` | 关闭 AI 复核，保留在线行情与量化计算 |
 
-从早期版本升级时，先停止已有服务，更新后在原目录启动即可沿用自选股与模型设置。原有的 `HENGJIAN_*` 变量和 `ASTRA_MODEL`、`ASTRA_CACHE_DIR`、`ASTRA_OFFLINE`、`ASTRA_ENABLED` 仍可使用。同一项同时设置新旧变量时，优先读取 `LILAC_OBSERVER_*`。页面已保存的模型设置优先于相应环境初值。
+升级时先停止服务，更新后在原目录启动即可沿用自选股、模拟账本与模型设置。页面已保存的模型设置优先于环境初值。[配置兼容说明](docs/research.md#配置兼容)
 
 同一端点的密钥栏留空可沿用原密钥。更换端点后，请填写该端点的专用密钥。可用「清除已保存密钥」取消密钥。备份、上传或提交文件前，请单独处理运行目录中的模型设置、自选列表与研究记录。
 
