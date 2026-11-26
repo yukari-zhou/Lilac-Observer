@@ -77,6 +77,10 @@
     if (active && stock?.id === active.stock.id) {
       if (horizon !== active.horizon) {
         active.horizon = horizon;
+        if (!active.pending) {
+          clearPreview(active);
+          message("");
+        }
         invalidateReview(active);
         drawReview(active);
       }
@@ -89,7 +93,7 @@
     if (!stock) return;
     const pending = savedOrder(stock.id);
     const ctx = active = {stock, horizon, side:pending?.side || "buy", pending, book:null,
-      review:null, reviewSeq:0, reviewBusy:false, reading:false, busy:false, stale:false, preview:null};
+      review:null, reviewSeq:0, reviewBusy:false, reading:false, busy:false, stale:false, preview:null, previewSeq:0};
     host.innerHTML = `<details class="paper-shell panel" id="paper-shell">
       <summary><span class="paper-heading"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="5" width="18" height="15" rx="2"/><path d="M3 10h18m-6 5h3"/></svg><strong id="paper-title">${say("A 股模拟交易与持仓复核", "A-share paper trading & position review")}</strong></span>
       <span class="paper-summary-name">${esc(language() === "en" ? stock.english || stock.code : stock.name)} <span aria-hidden="true">⌄</span></span></summary>
@@ -130,10 +134,10 @@
   function controls(ctx) {
     const locked = ctx.busy || !!ctx.pending;
     el("paper-qty").disabled = el("paper-side").disabled = locked;
-    el("paper-preview").disabled = !ctx.book?.quote?.price || locked || ctx.stale;
+    el("paper-preview").disabled = !ctx.book?.quote?.price || locked || ctx.reading || ctx.stale;
     const confirm = el("paper-confirm");
     confirm.hidden = !ctx.pending && !ctx.preview;
-    confirm.disabled = ctx.busy || (!ctx.pending && (!ctx.canTrade || ctx.stale));
+    confirm.disabled = ctx.busy || ctx.reading || (!ctx.pending && (!ctx.canTrade || ctx.stale));
     confirm.textContent = ctx.pending ? say("核对并重试原委托", "Check and retry original order")
       : say("确认模拟成交", "Confirm paper fill");
     el("paper-refresh").disabled = ctx.reading || ctx.busy;
@@ -198,7 +202,16 @@
       const previous = ctx.book;
       const changed = previous && (previous.cash !== book.cash ||
         previous.history[0]?.request_id !== book.history[0]?.request_id);
-      if (changed) { invalidateReview(ctx); drawReview(ctx); }
+      const quoteChanged = previous && (previous.quote?.asof?.slice(0, 10) !== book.quote?.asof?.slice(0, 10) ||
+        ["price", ctx.side === "buy" ? "ask" : "bid"].some(field => previous.quote?.[field] !== book.quote?.[field]));
+      if (ctx.preview && !ctx.pending && (changed || quoteChanged || previous?.can_trade !== book.can_trade)) {
+        clearPreview(ctx);
+        message(say("账户或报价已更新，请重新预览。", "The account or quote changed. Preview the order again."));
+      }
+      if (changed) {
+        invalidateReview(ctx);
+        drawReview(ctx);
+      }
       if (ctx.pending && book.history.some((r) => r.request_id === ctx.pending.request_id)) {
         remember(ctx, null);
         clearPreview(ctx);
@@ -223,25 +236,78 @@
     }
   }
   function clearPreview(ctx) {
+    ctx.previewSeq++;
     ctx.preview = null;
     el("paper-estimate").replaceChildren();
+  }
+  function riskEstimate(r, order) {
+    if (!r) return "";
+    const percent = n => Number.isFinite(n) ? amount(n) + "%" : "—";
+    const weight = `${percent(r.weight_before_pct)} → ${percent(r.weight_after_pct)}`;
+    const heading = say("若按这笔委托成交", "If this order fills");
+    const period = say(`${r.horizon} 日`, `${r.horizon}-day`);
+    let stop;
+    switch (r.stop_state) {
+      case "available":
+        stop = say(`如果余仓能按 ${period}保护线 ${yuan(r.stop_price)} 卖清，预计账户再减少 ${yuan(r.stop_loss)}（${percent(r.stop_loss_pct)}）。`,
+          `If your remaining shares could exit at the ${period} stop of ${yuan(r.stop_price)}, account equity would fall by an estimated ${yuan(r.stop_loss)} (${percent(r.stop_loss_pct)}).`);
+        break;
+      case "breached":
+        stop = say(`参考报价已触及或低于 ${period}保护线 ${yuan(r.stop_price)}。请按当前行情重新评估退出价格。`,
+          `The reference quote has reached or crossed the ${period} stop of ${yuan(r.stop_price)}. Review the current quote before planning an exit.`);
+        break;
+      case "closed":
+        stop = say("这笔卖出后，该股持仓归零。", "This sale closes your position in this stock.");
+        break;
+      case "stale":
+        stop = say("这只股票的估值报价较早。等到新报价后再估算退出损失。", "This stock’s valuation quote is stale. Wait for an updated quote before estimating the exit loss.");
+        break;
+      default:
+        stop = say("当前周期还没有可用保护线。研究数据更新后，可再预览退出情景。", "No usable stop is available for this horizon. Preview again when research updates.");
+    }
+    const sale = say(`成交后持有 ${amount(r.quantity_after, 0)} 股，当日可卖 ${amount(r.sellable_after, 0)} 股。`,
+      `You would hold ${amount(r.quantity_after, 0)} shares, with ${amount(r.sellable_after, 0)} available to sell today.`);
+    const locked = r.locked_after > 0 ? say(`其中 ${amount(r.locked_after, 0)} 股当天锁定。`, ` ${amount(r.locked_after, 0)} shares are locked for the day.`) : "";
+    let sector = say("缺少该股的行业资料，暂时无法估算同行业仓位。", "Sector exposure is unavailable because this stock’s sector is unknown.");
+    if (r.sector) {
+      const known = r.unknown_sector_count_before || r.unknown_sector_count_after;
+      sector = say(`${r.sector}占账户权益${known ? "的已知比例" : "的比例"} ${percent(r.sector_before_pct)} → ${percent(r.sector_after_pct)}。`,
+        `Portfolio exposure to ${translate(r.sector)} ${percent(r.sector_before_pct)} → ${percent(r.sector_after_pct)}${known ? " (known holdings only)" : ""}.`);
+      if (known) sector += say(" 部分持仓的行业未知，实际占比可能更高。", " Some holdings have no sector assignment, so exposure may be higher.");
+    }
+    const fill = say(`预计${sideName(order.side)} ${amount(order.quantity, 0)} 股，每股 ${yuan(order.fill_price)}，税费共 ${yuan(order.fees)}。`,
+      `${sideName(order.side)} ${amount(order.quantity, 0)} shares at an estimated ${yuan(order.fill_price)} each, plus ${yuan(order.fees)} in fees and taxes.`);
+    return `<div class="paper-impact"><h4>${heading}</h4>${note(fill)}<dl class="paper-metrics">
+      ${metric(say("该股占账户权益", "Stock weight in account"), weight)}
+      ${metric(say("剩余现金", "Cash remaining"), yuan(r.cash_after))}</dl>
+      <p>${esc(stop)}</p>${note(sale + locked)}
+      ${r.stale_mark_count ? note(say("账户估值中有持仓使用了较早报价，仓位及损失比例会随新报价变化。", "Some holdings use earlier quotes. Weights and loss estimates may change as prices update.")) : ""}
+      <details class="paper-risk-detail"><summary>${say("行业占比与估算依据", "Sector exposure and assumptions")}</summary>
+      ${note(sector)}${note(say(`账户权益 ${yuan(r.equity_before)} → ${yuan(r.equity_after)}。`, `Account equity ${yuan(r.equity_before)} → ${yuan(r.equity_after)}.`))}
+      ${r.stop_state === "available" ? note(say(`保护线取自 ${r.stop_asof || "—"} 的研究。测算假设其他持仓价格不变，并计入退出滑点和税费。跳空、跌停或当日锁仓都可能使实际退出价更低。`,
+        `Stop from research dated ${r.stop_asof || "—"}. The estimate includes exit slippage and fees and holds other prices fixed. Gaps, price limits or locked shares can lead to a lower exit price.`)) : ""}</details></div>`;
   }
   async function preview(ctx) {
     const quantity = el("paper-qty").valueAsNumber;
     if (ctx.busy || ctx.pending || !Number.isSafeInteger(quantity) || quantity < 1) return;
+    const horizon = ctx.horizon;
     ctx.side = el("paper-side").value;
     ctx.busy = true;
     clearPreview(ctx);
+    const seq = ctx.previewSeq;
     message(say("正在测算…", "Calculating…"));
     controls(ctx);
     try {
-      const result = await request("/preview", {}, post({symbol: ctx.stock.id, side:ctx.side, quantity}));
-      if (active !== ctx) return;
+      const result = await request("/preview", {}, post({symbol: ctx.stock.id, side:ctx.side, quantity, horizon}));
+      if (active !== ctx || ctx.previewSeq !== seq) return;
       const p = result.preview;
       if (!p || !Number.isFinite(p.quote_price)) throw Error(say("预览缺少有效报价", "No valid quote in preview"));
       ctx.preview = p;
       ctx.canTrade = result.can_trade;
-      el("paper-estimate").innerHTML = `<dl class="paper-metrics">
+      el("paper-estimate").innerHTML = `${riskEstimate(result.risk, p)}
+        <details class="paper-risk-detail"><summary>${say("成交价与交易费用", "Fill price and trading costs")}</summary>
+        <dl class="paper-metrics">
+        ${metric(say("行情最新价", "Last traded price"), yuan(p.last_price))}
         ${metric(say("成交参考报价", "Execution reference"), yuan(p.quote_price))}
         ${metric(say("含滑点成交价", "Slippage-adjusted fill"), yuan(p.fill_price))}
         ${metric(say("滑点金额", "Slippage amount"), yuan(p.slippage))}
@@ -250,11 +316,12 @@
         ${metric(say("印花税", "Stamp tax"), yuan(p.stamp_tax))}
         ${metric(say("资金变动", "Cash change"), yuan(p.cash_delta))}
         ${metric(say("预计现金余额", "Cash after fill"), yuan(p.cash_after))}</dl>
-        ${p.quote_asof ? note(say("测算报价时间", "Quote used for this estimate") + " · " + time(p.quote_asof)) : ""}`;
-      message(result.can_trade ? say("请核对费用后确认。", "Review costs before confirming.")
+        ${note(say("成交参考价会考虑对手方报价，再按方向计入滑点。账户估值使用最新价。", "The execution reference accounts for the opposing bid or ask. Slippage is applied to that price. Account weights use the last traded price."))}
+        ${p.quote_asof ? note(say("测算报价时间", "Quote used for this estimate") + " · " + time(p.quote_asof)) : ""}</details>`;
+      message(result.can_trade ? say("核对模拟结果后即可确认。", "Check this estimate before confirming the paper fill.")
         : translate(result.trade_reason || say("仅供盘后测算。", "For estimation only.")));
     } catch (error) {
-      if (active === ctx) message(error.message, true);
+      if (active === ctx && ctx.previewSeq === seq) message(error.message, true);
     } finally {
       if (active === ctx) {ctx.busy = false; controls(ctx);}
     }

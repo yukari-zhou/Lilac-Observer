@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -63,7 +64,25 @@ def _now():
     return datetime.now(TZ).isoformat(timespec="seconds")
 
 
-def _packet(index, market, analysis, config=None, position=None, lang="zh"):
+def _closing_stock_review(packet):
+    return ("paper_position" not in packet and packet["index"].get("kind") == "stock"
+            and packet["analysis"]["horizon"] == 5 and packet["quote_status"] == "latest")
+
+
+def replay_key(packet):
+    """Identify the public inputs to a closing review across languages and refreshes."""
+    model = dict(packet["analysis"])
+    # The cutoff selects the evidence. Its display clock can advance between
+    # reads of the same close; the selected evidence and every factor still count.
+    model.pop("evidence_cutoff", None)
+    model["notes"] = [re.sub(r"情报截止 .*?（上海）", "情报截止（上海）", line)
+                      for line in model.get("notes", [])]
+    public = {k: v for k, v in packet.items() if k != "lang"}
+    public["analysis"] = model
+    return sha256(json.dumps(public, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def build_packet(index, market, analysis, position=None, lang="zh"):
     if lang not in ("zh", "en"):
         raise ValueError("不支持的界面语言")
     q = market.get("quote") or {}
@@ -97,9 +116,14 @@ def _packet(index, market, analysis, config=None, position=None, lang="zh"):
                 if price and price >= .01:
                     summary[name] = float(liquidation_proceeds(price, shares, limit) - basis)
         packet["paper_position"] = summary
+    return packet
+
+
+def _cache_key(packet, config):
+    analysis = packet["analysis"]
     # Each quarter hour during a session can trigger a new review. Model results,
     # dated evidence and status invalidate a cached call outside that cadence.
-    stamp = str(q.get("asof") or analysis.get("as_of"))
+    stamp = str(packet["quote"].get("asof") or analysis.get("as_of"))
     try:
         t = datetime.fromisoformat(stamp)
         stamp = t.replace(minute=t.minute // 15 * 15, second=0, microsecond=0).isoformat()
@@ -111,11 +135,17 @@ def _packet(index, market, analysis, config=None, position=None, lang="zh"):
     provider = None if config is None else [config.provider, config.model]
     if config is not None and config.provider == "api":
         provider += [config.base_url, sha256(config.api_key.encode()).hexdigest()]
-    identity = [7, provider, lang, packet.get("paper_position"), index["id"], packet["adjustment"], analysis["horizon"], analysis.get("as_of"), stamp,
+    identity = [7, provider, packet["lang"], packet.get("paper_position"), packet["index"]["id"], packet["adjustment"], analysis["horizon"], analysis.get("as_of"), stamp,
                 packet["quote_status"], packet["history_status"], [interval.get(k) for k in ("low", "base", "high")],
-                analysis.get("direction"), analysis.get("strategy"), items]
-    key = sha256(json.dumps(identity, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-    return key, packet
+                analysis.get("direction"), analysis.get("strategy"), packet["evidence"]]
+    if _closing_stock_review(packet):
+        identity.append(replay_key(packet))
+    return sha256(json.dumps(identity, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def _packet(index, market, analysis, config=None, position=None, lang="zh"):
+    packet = build_packet(index, market, analysis, position, lang)
+    return _cache_key(packet, config), packet
 
 
 def _ask_codex(packet, config):
@@ -218,11 +248,12 @@ def _ask(packet, config):
 
 class Reviewer:
     """Coalesce identical requests and bound queued work to one per index/horizon."""
-    def __init__(self, db=None, runner=None, on_ready=None, settings=None):
+    def __init__(self, db=None, runner=None, on_ready=None, settings=None, claim_replay=None):
         self.db = Path(db) if db else runtime_dir() / "astra.sqlite"
         self.settings = settings or ModelSettings(self.db.parent / "model-settings.json")
         self.runner = runner
         self.on_ready = on_ready
+        self.claim_replay = claim_replay
         self.cv = threading.Condition()
         self.work = OrderedDict()
         self.current = {}
@@ -257,15 +288,34 @@ class Reviewer:
                     self.current.pop(slot)
                     self.work.pop(slot, None)
 
+    def cancel_replay_queue(self):
+        with self.cv:
+            for slot in list(self.work):
+                if "replay" in slot:
+                    self.work.pop(slot)
+                    self.current.pop(slot, None)
+
     def submit(self, index, market, analysis, position=None, lang="zh"):
-        slot = (index["id"], analysis["horizon"])
+        packet = build_packet(index, market, analysis, position, lang)
+        return self._submit_packet(packet, position=position)
+
+    def submit_frozen(self, packet):
+        if not _closing_stock_review(packet):
+            raise ValueError("复盘需要已冻结的个股收盘研究")
+        return self._submit_packet(packet, background=True)
+
+    def _submit_packet(self, packet, position=None, background=False):
+        analysis = packet["analysis"]
+        slot = (packet["index"]["id"], analysis["horizon"])
+        if background:
+            slot += ("replay",)
         if position is not None:
             slot += ("paper",)
-        if lang == "en":
+        if packet["lang"] == "en":
             slot += ("en",)
         with self.cv:
             config = self.settings.snapshot()
-            key, packet = _packet(index, market, analysis, config, position, lang)
+            key = _cache_key(packet, config)
             old = self.current.get(slot)
             if old and old[0] == key and (old[1]["status"] != "unavailable" or old[2] > time.monotonic()):
                 return old[1]
@@ -299,13 +349,30 @@ class Reviewer:
         while True:
             with self.cv:
                 self.cv.wait_for(lambda: bool(self.work))
-                slot, (key, packet, config) = self.work.popitem(last=False)
+                slot = next((s for s in self.work if "replay" not in s), next(iter(self.work)))
+                key, packet, config = self.work.pop(slot)
                 generation = self.generation
                 if self.current[slot][0] != key:
                     continue
                 model = packet["analysis"]
                 self.current[slot] = (key, self._state("running", "模型正在研判当前证据", model, config), 0)
             try:
+                # A foreground request and the closing collector may have queued
+                # the very same review. The worker is serial, so reuse its result.
+                closing_review = _closing_stock_review(packet)
+                if closing_review:
+                    with closing(sqlite3.connect(self.db)) as cx:
+                        hit = cx.execute("SELECT value FROM reviews WHERE key=?", (key,)).fetchone()
+                    if hit:
+                        with self.cv:
+                            if self.generation == generation and self.current.get(slot, (None,))[0] == key:
+                                self.current[slot] = (key, json.loads(hit[0]), 0)
+                        continue
+                if "replay" in slot and (self.claim_replay is None or not self.claim_replay(packet)):
+                    with self.cv:
+                        if self.generation == generation and self.current.get(slot, (None,))[0] == key:
+                            self.current.pop(slot)
+                    continue
                 answer = self.runner(packet) if self.runner else _ask(packet, config)
                 decisions = {"follow": model["strategy"]["action"],
                              "wait": "等待确认，暂停新增风险敞口",
@@ -324,6 +391,8 @@ class Reviewer:
                         decision = "当前持仓暂无可卖股数，等待解除 T+1 限制后复核"
                 state = self._state("ready", "模型已完成证据复核", model, config, updated_at=_now(),
                                     decision=decision, **answer)
+                if closing_review:
+                    state["replay_key"] = replay_key(packet)
                 with self.cv:
                     if self.generation != generation or self.current.get(slot, (None,))[0] != key:
                         continue
@@ -332,7 +401,10 @@ class Reviewer:
                             cx.execute("INSERT OR REPLACE INTO reviews VALUES (?,?,?)",
                                        (key, json.dumps(state, ensure_ascii=False), time.time()))
                         if self.on_ready is not None:
-                            self.on_ready(packet, state)
+                            try:
+                                self.on_ready(packet, state)
+                            except (sqlite3.Error, OSError):
+                                logging.exception("Could not archive completed research for %s", packet["index"]["id"])
             except Exception as e:
                 message = str(e) if isinstance(e, RuntimeError) else "模型超时或响应格式无效，稍后自动重试"
                 state = self._state("unavailable", message, model, config)

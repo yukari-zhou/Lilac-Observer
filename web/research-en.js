@@ -126,6 +126,7 @@ API 地址须为不含凭据、查询参数和片段的服务地址|Enter the en
 尚无可用报价|No quote available.
 该股停牌或尚无有效成交|The stock is suspended or has no confirmed trades.
 连续竞价时段以外，仅可测算费用|Outside continuous trading hours. Cost previews are available.
+连续竞价时段以外，可预览费用和持仓变化|Outside continuous trading hours. You can preview costs and changes to your holdings.
 报价时间无效，请刷新|Invalid quote timestamp. Refresh the quote.
 需要同一交易时段内的实时有效报价|A live quote from the current trading session is required.
 暂无可成交的对手方报价|No executable quote on the opposite side of the book.

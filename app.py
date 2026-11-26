@@ -1,9 +1,10 @@
 """Local A-share research harness. Run with python app.py --open."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, time as daytime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -14,33 +15,38 @@ import time
 from urllib.parse import parse_qs, urlsplit
 import webbrowser
 
-from astra import Reviewer, TZ
+from astra import Reviewer, TZ, build_packet, replay_key
 from engine import analyze
 from forward import ForwardBook
-from llm_config import runtime_dir
+from llm_config import offline, runtime_dir
 import fundamentals
 import sources
 import stocks
 import stock_fundamentals
-from paper_service import PaperDesk
+from paper_service import PaperDesk, _continuous
+from replay import ReplayBook
 from watchlist import Watchlist
 
 
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
-VERSION = "0.3.1"
+VERSION = "0.4.0"
 
 
 class Harness:
     def __init__(self):
         self.indices = {i["id"]: {**i, "kind": "index"} for i in sources.catalog()}
         self.watchlist = Watchlist(runtime_dir() / "watchlist.sqlite")
-        self.paper = PaperDesk(runtime_dir() / "paper.sqlite", self.watchlist)
+        self.paper = PaperDesk(runtime_dir() / "paper.sqlite", self.watchlist, self.risk_context)
         self.default = "sh000300" if "sh000300" in self.indices else next(iter(self.indices))
         self.forward = ForwardBook(runtime_dir() / "forward.sqlite")
-        self.reviewer = Reviewer(on_ready=self.forward.record)
+        self.replay = ReplayBook(runtime_dir() / "replay.sqlite")
+        self.collector_stop = threading.Event()
+        self.ai_preference_lock = threading.Lock()
+        self.reviewer = Reviewer(on_ready=self.review_completed, claim_replay=self.claim_replay)
         self.pool = ThreadPoolExecutor(6, thread_name_prefix="research-feed")
         self.snapshots = {}
+        self.risk_lines = {}
         self.locks = {key: threading.Lock() for key in self.indices}
 
     def instrument(self, symbol):
@@ -50,7 +56,10 @@ class Harness:
         selected = [s["id"] for s in self.watchlist.all()]
         pending = self.pool.submit(stocks.quotes, selected) if selected else None
         quotes = sources.quotes()
-        return {**quotes, **(pending.result() if pending else {})}
+        stock_quotes = pending.result() if pending else {}
+        if stock_quotes:
+            self.observe_replay(stock_quotes, sources.now())
+        return {**quotes, **stock_quotes}
 
     def _market(self, security):
         symbol = security["id"]
@@ -93,11 +102,162 @@ class Harness:
             if market is None or time.monotonic() - ts >= 15:
                 market = self._market(index)
                 self.snapshots[symbol] = (time.monotonic(), market)
-        return index, market, analyze(market, horizon)
+        analysis = analyze(market, horizon)
+        if index["kind"] == "stock":
+            self.risk_lines[symbol, horizon] = (market["meta"], analysis)
+        return index, market, analysis
+
+    def risk_context(self, symbols, selected, horizon, quote):
+        sectors = {}
+        for symbol in symbols:
+            _, market = self.snapshots.get(symbol, (0, {}))
+            item = next((e for e in market.get("evidence", []) if e.get("index_id") == symbol and e.get("report")), None)
+            if item is None:
+                stored = sources._read(sources.CACHE / f"stock-fin-{symbol}.json.gz")
+                item = stored and stored["value"]
+            if isinstance(item, dict) and item.get("index_id") == symbol and item.get("report", {}).get("sector"):
+                sectors[symbol] = item["report"]["sector"]
+        context = {"sectors": sectors}
+        meta, analysis = self.risk_lines.get((selected, horizon), ({}, {}))
+        origin = analysis.get("as_of")
+        if (not origin or analysis.get("historical") or analysis.get("status") != "ok"
+                or meta.get("history_status") != "latest" or meta.get("adjustment") != "qfq"
+                or not quote or quote.get("status") not in ("live", "latest")):
+            return context
+        # A line expressed on yesterday's scale is unusable after an ex-rights
+        # adjustment. Anchor it to the selected quote's own close or prior close.
+        try:
+            stamp = datetime.fromisoformat(quote["asof"])
+            if stamp.tzinfo is None:
+                return context
+            stamp = stamp.astimezone(TZ)
+            age = (stamp.date() - datetime.fromisoformat(origin).date()).days
+        except (KeyError, ValueError, TypeError):
+            return context
+        basis = quote.get("prev_close") if age else quote.get("price")
+        if (0 <= age <= 7 and basis and abs(basis - analysis["base_price"]) < .005
+                and (age or stamp.time() >= daytime(15))
+                and str(meta.get("asof") or "")[:10] == stamp.date().isoformat()):
+            context.update(stop=analysis["strategy"]["stop"], stop_asof=origin)
+        return context
+
+    def review_completed(self, packet, review):
+        try:
+            self.forward.record(packet, review)
+        finally:
+            if review.get("replay_key"):
+                self.replay.attach_review(packet["index"]["id"], review["as_of"], review["replay_key"], review, sources.now())
+
+    def claim_replay(self, packet):
+        symbol = packet["index"]["id"]
+        with self.ai_preference_lock:
+            return (self.replay.auto_ai() and not self.reviewer.settings.snapshot().disabled
+                    and self.watchlist.get(symbol) is not None
+                    and self.replay.claim_review(symbol, packet["analysis"]["as_of"], replay_key(packet), sources.now()))
+
+    def queue_frozen_reviews(self, now, fresh=None):
+        with self.ai_preference_lock:
+            if not self.replay.auto_ai() or self.reviewer.settings.snapshot().disabled:
+                return
+            pending = {fresh["index"]["id"]: fresh} if fresh is not None else self.replay.pending_reviews(now)
+            for symbol, packet in pending.items():
+                if self.watchlist.get(symbol):
+                    review = self.reviewer.submit_frozen(packet)
+                    if review.get("replay_key"):
+                        self.replay.attach_review(symbol, packet["analysis"]["as_of"], review["replay_key"], review, sources.now())
+
+    def capture_replay(self, index, market, analysis, now, lang="zh"):
+        symbol = index["id"]
+        if (index["kind"] != "stock" or analysis["horizon"] != 5 or now.weekday() >= 5 or now.hour < 15
+                or analysis.get("as_of") != now.date().isoformat() or not analysis.get("validation", {}).get("n")
+                or not self.replay.needs_capture(symbol, now.date())):
+            return
+        packet = build_packet(index, market, analysis, lang=lang)
+        digest = replay_key(packet)
+        price = analyze({**market, "evidence": []}, 5)
+        if self.replay.capture(symbol, market, price, analysis, digest, now, packet=packet):
+            self.queue_frozen_reviews(now, fresh=packet)
+
+    def observe_replay(self, quotes, now):
+        if now.weekday() < 5 and _continuous(now):
+            for symbol in self.replay.pending_symbols(now.date()).intersection(quotes):
+                self.replay.observe(symbol, quotes[symbol], now)
+
+    def replay_eligibility(self, symbol):
+        meta, analysis = self.risk_lines.get((symbol, 5), ({}, {}))
+        if not analysis:
+            return "unknown"
+        if meta.get("adjustment") != "qfq" or analysis.get("status") != "ok":
+            return "history"
+        if analysis.get("historical") or meta.get("history_status") != "latest":
+            return "stale"
+        return "ready" if analysis.get("validation", {}).get("n") else "unvalidated"
+
+    def collect_replay(self):
+        now = sources.now()
+        if offline():
+            return
+        if now.hour >= 15 or now.time() < daytime(9, 15) or now.weekday() >= 5:
+            self.queue_frozen_reviews(now)
+        if now.weekday() >= 5:
+            return
+        watched = {s["id"] for s in self.watchlist.all()}
+        if _continuous(now):
+            pending = self.replay.pending_symbols(now.date()).intersection(watched)
+            if pending:
+                self.observe_replay(stocks.quotes(sorted(pending)), sources.now())
+        elif now.hour >= 15:
+            needed = []
+            for symbol in sorted(watched):
+                meta, model = self.risk_lines.get((symbol, 5), ({}, {}))
+                if (model.get("as_of") == now.date().isoformat() and meta.get("history_status") == "latest"
+                        and meta.get("adjustment") == "qfq" and not model.get("validation", {}).get("n")):
+                    continue
+                if self.replay.needs_capture(symbol, now.date()):
+                    needed.append(symbol)
+            for symbol, quote in (stocks.quotes(needed) if needed else {}).items():
+                if self.collector_stop.is_set():
+                    break
+                if (not quote or quote.get("status") != "latest" or
+                        str(quote.get("asof") or "")[:10] != now.date().isoformat()):
+                    continue
+                try:
+                    index, market, analysis = self.research_inputs(symbol, 5)
+                    self.capture_replay(index, market, analysis, sources.now())
+                except KeyError:
+                    if self.watchlist.get(symbol):
+                        logging.exception("Closing data incomplete for %s", symbol)
+                except Exception:
+                    logging.exception("Could not capture closing data for %s", symbol)
+
+    def start_replay(self):
+        def run():
+            while not self.collector_stop.is_set():
+                try:
+                    self.collect_replay()
+                except Exception:
+                    logging.exception("Could not collect replay data")
+                if self.collector_stop.wait(300 if sources.now().hour >= 15 else 30):
+                    break
+        threading.Thread(target=run, name="stock-replay", daemon=True).start()
+
+    def replay_settings(self, data):
+        if not isinstance(data, dict) or data.keys() != {"auto_ai"} or type(data["auto_ai"]) is not bool:
+            raise ValueError("请选择是否自动复核自选股")
+        with self.ai_preference_lock:
+            enabled = self.replay.set_auto_ai(data["auto_ai"])
+            if not enabled:
+                self.reviewer.cancel_replay_queue()
+        if enabled:
+            self.queue_frozen_reviews(sources.now())
+        return {"auto_ai": enabled, "model_enabled": not self.reviewer.settings.snapshot().disabled}
 
     def research(self, symbol, horizon, lang="zh"):
         index, market, analysis = self.research_inputs(symbol, horizon)
+        self.capture_replay(index, market, analysis, sources.now(), lang)
         review = self.reviewer.submit(index, market, analysis, lang=lang)
+        if review.get("replay_key"):
+            self.replay.attach_review(symbol, analysis["as_of"], review["replay_key"], review, sources.now())
         track = self.forward.track(symbol, horizon, market["bars"], adjustment=market["meta"].get("adjustment"))
         return dict(index=index, market=market, analysis=analysis, review=review, astra=review, forward=track,
                     generated_at=datetime.now(TZ).isoformat(timespec="seconds"))
@@ -222,11 +382,25 @@ class Endpoint(BaseHTTPRequestHandler):
                 return self.respond(200, settings)
             if path.path == "/api/watchlist":
                 return self.update_watchlist(app)
+            if path.path == "/api/replay/settings":
+                try:
+                    return self.respond(200, app.replay_settings(self.read_json(512)))
+                except ValueError as error:
+                    return self.respond(400, {"error": str(error)})
             if path.path.startswith("/api/paper/"):
                 return self.paper_request(app, path)
             return self.respond(404, {"error": "资源不存在"})
         if path.path == "/api/paper" or path.path.startswith("/api/paper/"):
             return self.paper_request(app, path)
+        if path.path == "/api/replay":
+            symbol = parse_qs(path.query).get("symbol", [""])[0]
+            try:
+                app.paper.stock(symbol)
+            except ValueError as error:
+                return self.respond(400, {"error": str(error)})
+            return self.respond(200, {**app.replay.report(symbol, sources.now()), "eligibility": app.replay_eligibility(symbol),
+                                      "auto_ai": app.replay.auto_ai(),
+                                      "model_enabled": not app.reviewer.settings.snapshot().disabled})
         if path.path == "/api/settings":
             return self.respond(200, app.reviewer.settings.public())
         if path.path == "/api/search":
@@ -302,6 +476,7 @@ def main():
             return
         sys.exit(f"Port {args.port} is unavailable. Choose another with --port.")
     server.harness = Harness()
+    server.harness.start_replay()
     print("研究台已启动，可以直接访问", url, flush=True)
     print("使用期间请保留此服务窗口，按 Ctrl+C 停止服务。", flush=True)
     if args.open:
@@ -311,6 +486,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        server.harness.collector_stop.set()
         server.server_close()
         server.harness.pool.shutdown(wait=False, cancel_futures=True)
 

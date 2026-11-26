@@ -20,7 +20,7 @@ def fill_block(quote, now, side=None, fill_price=None):
     if quote.get("suspended"):
         return "该股停牌或尚无有效成交"
     if now.weekday() >= 5 or not _continuous(now):
-        return "连续竞价时段以外，仅可测算费用"
+        return "连续竞价时段以外，可预览费用和持仓变化"
     try:
         stamp = datetime.fromisoformat(quote["asof"])
         if stamp.tzinfo is None:
@@ -41,9 +41,10 @@ def fill_block(quote, now, side=None, fill_price=None):
 
 
 class PaperDesk:
-    def __init__(self, path, watchlist):
+    def __init__(self, path, watchlist, risk_context=None):
         self.book = PaperBook(path)
         self.watchlist = watchlist
+        self.risk_context = risk_context
         self.lock = threading.RLock()
 
     def stock(self, symbol):
@@ -88,6 +89,8 @@ class PaperDesk:
         keys = {"symbol", "side", "quantity"}
         if confirm:
             keys.update(("request_id", "expected_price"))
+        elif "horizon" in data:
+            keys.add("horizon")
         if data.keys() != keys:
             raise ValueError("模拟订单字段不完整或含未知字段")
         symbol, side, quantity = data["symbol"], data["side"], data["quantity"]
@@ -106,18 +109,26 @@ class PaperDesk:
                     raise ValueError
             except (InvalidOperation, ValueError):
                 raise ValueError("请先预览当前报价") from None
+        horizon = data.get("horizon", 5)
+        if type(horizon) is not int or horizon not in (1, 5, 20):
+            raise ValueError("预测周期可选 1、5、20 个交易日")
         stock = self.stock(symbol)
-        quote = stocks.quotes([symbol]).get(symbol)
+        symbols = [symbol] if confirm else list(dict.fromkeys([symbol, *self.book.symbols()]))
+        marks = stocks.quotes(symbols)
+        quote = marks.get(symbol)
         if not quote:
             raise ValueError("尚无可用报价")
         opposite = quote.get("ask" if side == "buy" else "bid")
         reference = (max if side == "buy" else min)(quote["price"], opposite) if opposite else quote["price"]
         executable = {**quote, "last_price": quote["price"], "price": reference}
         now = sources.now()
+        if not confirm:
+            research = self.risk_context(symbols, symbol, horizon, quote) if self.risk_context else {}
+            preview, risk = self.book.preview_with_risk(symbol, side, quantity, executable, marks, research, horizon, now)
+            reason = fill_block(quote, now, side, preview["fill_price"])
+            return {"preview": preview, "risk": risk, "can_trade": not reason, "trade_reason": reason}
         preview = self.book.preview(symbol, side, quantity, executable, now=now)
         reason = fill_block(quote, now, side, preview["fill_price"])
-        if not confirm:
-            return {"preview": preview, "can_trade": not reason, "trade_reason": reason}
         if reason:
             raise ValueError(reason)
         if Decimal(str(reference)) != expected:

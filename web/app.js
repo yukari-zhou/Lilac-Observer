@@ -23,9 +23,9 @@
   let searchTimer, searchRequest, savingWatchlist = false;
   const isStock = () => state.group === "stock";
   function syncPaper() {
-    const stock = isStock() && state.view === "overview"
-      ? state.stocks.find((row) => row.id === state.index) : null;
-    window.LilacPaper?.select(stock, state.horizon);
+    const stock = isStock() ? state.stocks.find((row) => row.id === state.index) : null;
+    window.LilacPaper?.select(state.view === "overview" ? stock : null, state.horizon);
+    window.LilacReplay?.select(state.view === "validation" ? stock : null);
   }
   const unit = () => isStock() ? "元" : "点";
   const instruments = () => isStock() ? state.stocks : state.indices;
@@ -367,7 +367,7 @@
     const s = a.strategy || {};
     const row = (label, v, cls = "") =>
       `<div class="strategy-line"><dt>${label}</dt><dd class="${cls}">${esc(v || "—")}</dd></div>`;
-    return `<section class="panel panel-pad"><div class="panel-top">${heading("risk", "策略与风控")}</div><dl class="strategy-lines">
+    return `<section class="panel panel-pad"><div class="panel-top">${heading("risk", "策略与风控")}${isStock() ? link("validation", window.LilacI18n.lang === "en" ? "View strategy replay" : "查看策略复盘") : ""}</div><dl class="strategy-lines">
       ${row("风险阈值", finite(s.stop) ? `${number(s.stop)} ${unit()}` : "—", "stop")}${row("止损条件", s.stop_note)}${row("触发条件", s.trigger)}${row("仓位参考", s.position)}${row("复核", s.review)}</dl>${window.LilacPaper?.costExample(s.trade_costs) || ""}</section>`;
   }
   function reviewStatus(agent) {
@@ -711,6 +711,7 @@
       init();
       return;
     }
+    window.LilacReplay?.refresh();
     quoteTape(true);
     research();
   }
@@ -809,7 +810,10 @@
     if (state.auto && !document.hidden) quoteTape();
   }, 15000);
   setInterval(() => {
-    if (state.auto && !document.hidden && !state.loading) research();
+    if (state.auto && !document.hidden && !state.loading) {
+      window.LilacReplay?.refresh();
+      research();
+    }
   }, 60000);
   viewFromHash();
   init();

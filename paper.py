@@ -80,6 +80,25 @@ def _today_buys(db, symbol, day):
         WHERE symbol=? AND side='buy' AND trade_date=?""", (symbol, day)).fetchone()[0]
 
 
+def _mark(row, quotes, now):
+    """Use the latest eligible unadjusted mark, retaining its timestamp and provenance."""
+    symbol = row["symbol"]
+    stamp = datetime.fromisoformat(row["quote_asof"])
+    if quotes.get(symbol):
+        try:
+            price, next_stamp, source = _quote(symbol, quotes[symbol])
+        except ValueError:
+            pass
+        else:
+            if stamp <= next_stamp <= now + timedelta(seconds=5):
+                return price, next_stamp, source, "quote", quotes[symbol].get("status", "unknown")
+    return _yuan(row["quote_cents"]), stamp, row["quote_source"], "last_trade_quote", "last_trade_quote"
+
+
+def _percent(value, equity):
+    return float((100 * value / equity).quantize(Decimal(".0001"), rounding=ROUND_HALF_UP)) if equity > 0 else None
+
+
 class PaperBook:
     def __init__(self, path):
         self.path = Path(path)
@@ -158,6 +177,75 @@ class PaperBook:
             db.execute("BEGIN")
             return self._price_order(db, symbol, side, quantity, quote, _now(now), False)[0]
 
+    def preview_with_risk(self, symbol, side, quantity, quote, marks, research, horizon, now):
+        """Price the order and the account impact from one consistent read transaction."""
+        now = _now(now)
+        sectors = research.get("sectors") or {}
+        sector = sectors.get(symbol) or None
+        with closing(self._connect()) as db, db:
+            db.execute("BEGIN")
+            order, held_after, _, balance, _ = self._price_order(db, symbol, side, quantity, quote, now, False)
+            bought_today = _today_buys(db, symbol, now.date().isoformat())
+            positions = db.execute("SELECT * FROM positions").fetchall()
+
+        # Pre- and post-order weights use identical marks for every stock. The order's
+        # spread, slippage and fees affect cash; they never inflate the marked equity.
+        held_before = held_after - quantity if side == "buy" else held_after + quantity
+        mark = Decimal(str(order["last_price"]))
+        status = marks[symbol].get("status")
+        other_value = known_sector_value = Decimal(0)
+        stale_marks = unknown_sectors = 0
+        for row in positions:
+            price, _, _, _, mark_status = _mark(row, marks, now)
+            if row["symbol"] == symbol:
+                mark, status = price, mark_status
+                continue
+            value = price * row["quantity"]
+            other_value += value
+            group = sectors.get(row["symbol"])
+            if not group:
+                unknown_sectors += 1
+            elif group == sector:
+                known_sector_value += value
+            if mark_status not in ("live", "latest"):
+                stale_marks += 1
+
+        fresh = status in ("live", "latest") and marks[symbol].get("status") in ("live", "latest")
+        cash_after = _yuan(balance)
+        cash_before = cash_after - Decimal(str(order["cash_delta"]))
+        stock_before, stock_after = mark * held_before, mark * held_after
+        equity_before, equity_after = cash_before + other_value + stock_before, cash_after + other_value + stock_after
+        locked = bought_today + (quantity if side == "buy" else 0)
+        risk = dict(
+            horizon=horizon, cash_before=float(cash_before), cash_after=float(cash_after),
+            equity_before=float(equity_before), equity_after=float(equity_after),
+            weight_before_pct=_percent(stock_before, equity_before), weight_after_pct=_percent(stock_after, equity_after),
+            quantity_after=held_after, sellable_after=held_after-locked, locked_after=locked,
+            sector=sector,
+            sector_before_pct=_percent(known_sector_value + stock_before, equity_before) if sector else None,
+            sector_after_pct=_percent(known_sector_value + stock_after, equity_after) if sector else None,
+            unknown_sector_count_before=unknown_sectors + int(not sector and held_before > 0),
+            unknown_sector_count_after=unknown_sectors + int(not sector and held_after > 0),
+            stale_mark_count=stale_marks + int(not fresh),
+            stop_state="missing", stop_asof=research.get("stop_asof"), stop_price=None,
+            stop_loss=None, stop_loss_pct=None, equity_at_stop=None,
+        )
+        if not held_after:
+            risk.update(stop_state="closed", stop_loss=0.0, stop_loss_pct=0.0, equity_at_stop=float(equity_after))
+        elif not fresh:
+            risk["stop_state"] = "stale"
+        elif research.get("stop") and research.get("stop_asof"):
+            stop = Decimal(str(research["stop"]))
+            if stop.is_finite() and stop >= Decimal(".01"):
+                risk["stop_price"] = float(stop)
+                risk["stop_state"] = "breached" if mark <= stop else "available"
+                if mark > stop:
+                    proceeds = liquidation_proceeds(stop, held_after, market_order_limit(symbol))
+                    loss = stock_after - proceeds
+                    risk.update(stop_loss=float(loss), stop_loss_pct=_percent(loss, equity_after),
+                                equity_at_stop=float(equity_after - loss))
+        return order, risk
+
     def trade(self, symbol, name, side, quantity, quote, request_id, now=None):
         with closing(self._connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
@@ -193,19 +281,8 @@ class PaperBook:
             market_value = net_exit = total_basis = Decimal(0)
             for row in db.execute("SELECT * FROM positions ORDER BY symbol"):
                 symbol, quantity = row["symbol"], row["quantity"]
-                basis, price = _yuan(row["basis_cents"]), _yuan(row["quote_cents"])
-                stamp = datetime.fromisoformat(row["quote_asof"])
-                source, valuation, status = row["quote_source"], "last_trade_quote", "last_trade_quote"
-                candidate = quotes.get(symbol)
-                if candidate:
-                    try:
-                        next_price, next_stamp, next_source = _quote(symbol, candidate)
-                    except ValueError:
-                        pass
-                    else:
-                        if stamp <= next_stamp <= now + timedelta(seconds=5):
-                            price, stamp, source = next_price, next_stamp, next_source
-                            valuation, status = "quote", candidate.get("status", "unknown")
+                basis = _yuan(row["basis_cents"])
+                price, stamp, source, valuation, status = _mark(row, quotes, now)
                 value = price * quantity
                 maximum = market_order_limit(symbol)
                 proceeds = liquidation_proceeds(price, quantity, maximum)

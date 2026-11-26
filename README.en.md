@@ -6,7 +6,7 @@
 
 Search for a listed company or select one of six market indices. Inspect the price history, financial filings and news behind each forecast, then compare scenarios over 1, 5 or 20 trading sessions. For individual stocks, you can open a simulated long position and ask the model how the evidence relates to its cost, weight and sellable balance.
 
-[Download v0.3.1](https://github.com/yukari-zhou/Lilac-Observer/releases/tag/v0.3.1) · [Changelog](CHANGELOG.md) · [Research methods and local API](docs/research.md)
+[Download v0.4.0](https://github.com/yukari-zhou/Lilac-Observer/releases/tag/v0.4.0) · [Changelog](CHANGELOG.md) · [Research methods and local API](docs/research.md)
 
 ![Lilac-Observer paper account showing a simulated position, its break-even price and an itemized order preview](docs/paper-preview-en.png)
 
@@ -28,11 +28,13 @@ Select English in the interface or use the English URL directly. Original compan
 ## Paper trading
 
 1. Select a stock from your watchlist and expand **A-share paper trading & position review**. All watchlist stocks share one local cash account, starting with **RMB 1,000,000**.
-2. Choose Buy or Sell, enter the share quantity and select **Preview order**. Check the reference quote, simulated fill, slippage, itemized fees and cash change. Select **Confirm paper fill** to post it to your ledger. Purchases use available cash. Stock bought today becomes eligible for sale on the next trading day. Board-specific order sizes and sellable balances apply.
+2. Choose Buy or Sell, enter the number of shares and select **Preview order**. Under **If this order fills**, check how much cash would remain, how much of your account this stock would represent and how many shares you could still sell today. Open **Sector exposure and assumptions** to see how much you would hold in the same sector. When a usable stop is available, the preview estimates how much account equity you could lose by selling the remaining shares there. Try a smaller quantity to compare, then select **Confirm paper fill** to record the order.
 3. Check the position’s cost, current value, unrealized P&L and estimated P&L after liquidation. Under the stock’s strategy and risk section, expand **Trading cost scenario** to compare break-even and net P&L at the base forecast and at the risk threshold for an illustrative order.
 4. To request a position review, select the review button for the current stock. The selected model receives the stock’s simulated position, sellable quantity, cost, weight, account cash and equity, together with the research packet. Ordinary market reviews use public market inputs. Position reviews run on explicit request, do not place orders and are kept separate from forecast validation.
 
-Simulated execution requires a fresh quote and an opposing quote during continuous trading in Shanghai time, from 09:30 up to 11:30 and from 13:00 up to 14:57. For buys, the reference is the higher of the last price and best ask. For sells, it is the lower of the last price and best bid. Outside these windows, available quotes can still support cost previews. Orders are recorded locally without a brokerage connection.
+**Fill price and trading costs** shows the simulated execution price with slippage and itemized fees. The stop comes from the selected 1-, 5- or 20-session research. The estimate keeps other holdings at their current marks and deducts exit costs. Shares bought today become eligible for sale on the next trading day. Gaps, price limits and suspensions can prevent an exit at the stop. The preview flags older quotes, incomplete sector coverage and unavailable stops.
+
+Simulated execution requires a fresh quote and an opposing quote during continuous trading in Shanghai time, from 09:30 up to 11:30 and from 13:00 up to 14:57. For buys, the reference is the higher of the last price and best ask. For sells, it is the lower of the last price and best bid. Outside these windows, available quotes can still support previews. Orders are recorded locally without a brokerage connection.
 
 | Cost | Simulation assumption |
 | --- | --- |
@@ -74,6 +76,18 @@ Keep runtime files and credentials private when sharing a copy of the project. E
 The forecast starts at the last completed daily close. It combines price factors with eligible financial reports, news, sector and macroeconomic evidence. Index fundamentals summarize covered constituents among the top 20 by weight. Company views use that company’s disclosures. Check the publication date, source and actual coverage before interpreting a signal.
 
 Under validation, compare direction accuracy and mean absolute error with their baselines. Read interval coverage alongside sample count. A newly listed stock may have enough data to draw a chart but too few completed windows to support a directional forecast. The historical statistics measure price forecasts. The strategy’s illustrative round trip and the paper account calculate execution costs separately. Eligible ordinary reviews enter a local forward log and are checked against subsequent closes.
+
+## Does evidence or AI help on this stock?
+
+Select a watchlist stock and open **Validation → Strategy replay**. Each strategy starts with RMB 1,000,000 and uses that stock’s recorded **5-session signal** to choose between holding shares and holding cash. The comparison runs independently of your personal paper account.
+
+1. **Collect the two observations.** Run the local service after the 15:00 Shanghai close to save the day's signals. Run it again during continuous trading on the next weekday to capture the first valid quote the service observes. You can close the browser. Missed signals and quotes cannot be backfilled. Holidays and suspensions can leave gaps.
+2. **Choose a date group.** **All quant records** compares Price signals, Price + evidence and Buy and hold. **Dates with AI review** also includes With AI review, using only decision dates with a timely review and a subsequent quote. Each group starts with its own cash balance. Compare strategies within the same group. If a quote day is missing or the prior-close figures cannot be reconciled, both groups start again and the page shows the new start date.
+3. **Read the return alongside the drawdown.** Net return includes costs. Maximum drawdown shows the largest decline from an earlier account high. Open **See trading activity and costs** for turnover, fees and unfilled orders. A handful of observed days gives little evidence about how a strategy performs across market conditions.
+
+**Request after-close AI reviews for all watchlist stocks** is off by default. Quant records accumulate automatically. Ordinary stock research can request reviews independently, and timely, eligible results can enter the comparison.
+
+Turning this on, or restarting the service with it enabled, can immediately queue eligible signals across the entire watchlist. The collector uses the public inputs saved at the time and makes at most one automatic model call per signal before the 09:15 Shanghai cutoff on the next weekday. Cloud providers may charge for these calls. The AI row reflects the model selected for each review, so switching models can mix their decisions within one comparison period. [Replay rules and metrics](docs/research.md#个股策略复盘)
 
 ## Troubleshooting
 
